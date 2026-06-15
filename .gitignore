@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.env
+.venv
+env/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Model weights (large files)
+weights/**/*.pt
+weights/**/*.pth
+weights/**/*.onnx
+weights/**/*.engine
+*.pt
+*.pth
+
+# Generated outputs
+results/
+output.jpg
+outputs/
+
+# Logs
+*.log

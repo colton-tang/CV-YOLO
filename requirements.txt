@@ -1,0 +1,5 @@
+ultralytics>=8.4.0
+git+https://github.com/ultralytics/CLIP.git
+transformers>=4.57.0
+torch>=2.1.0
+Pillow>=10.0.0
