@@ -163,3 +163,20 @@ model.export(format="onnx")
 See the [Ultralytics export docs](https://docs.ultralytics.com/modes/export/) for supported formats.
 
 > **Note:** YOLO-World models use a CLIP text encoder and are typically exported differently. Refer to the Ultralytics YOLO-World documentation for export details.
+
+---
+
+## EdgeAnomalyCCTV
+
+### Run the video anomaly detection program
+
+```bash
+# 1. Navigate to the project root directory
+cd /Users/t/CV
+
+# 2. Activate the virtual environment
+source venv/bin/activate
+
+# 3. Run the program (unbuffered mode)
+python -u EdgeAnomalyCCTV/src/main.py --mode video
+```
