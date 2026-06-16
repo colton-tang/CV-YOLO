@@ -11,7 +11,7 @@ class RenderAlertLayer:
             return (0, 0, 255)
         return (0, 255, 0)
 
-    def process(self, tracking_state, source_type, raw_frame=None, mqtt_client=None):
+    def process(self, tracking_state, source_type, raw_frame=None, mqtt_client=None, active_track_ids=None):
         print(f"\n--- Output Results (Source: {source_type}) ---")
         if source_type == "VIDEO":
             print("Video Render: Overlay updated. MQTT alert sent (if outlier).")
@@ -22,6 +22,8 @@ class RenderAlertLayer:
             if raw_frame is not None:
                 output_image = raw_frame.copy()
                 for track_id, info in tracking_state.items():
+                    if active_track_ids is not None and track_id not in active_track_ids:
+                        continue
                     if "bbox" in info:
                         x1, y1, x2, y2 = [int(v) for v in info["bbox"]]
                         cls = info.get("display_class", info.get("class", "unknown"))

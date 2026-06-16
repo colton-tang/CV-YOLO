@@ -19,6 +19,17 @@ class DetectionTrackingLayer:
         self.known_classes = set(known_classes or [])
         self.model = YOLO(model_path)
 
+        if "world" in model_path.lower():
+            import yaml
+            from ultralytics.utils.checks import check_yaml
+            try:
+                with open(check_yaml("lvis.yaml"), "r", encoding="utf-8") as f:
+                    lvis_data = yaml.safe_load(f)
+                yolo_classes = list(lvis_data["names"].values())
+            except Exception:
+                yolo_classes = list(self.known_classes) + ["unknown object", "anomaly", "foreign object"]
+            self.model.set_classes(yolo_classes)
+
     def process(self, input_data):
         raw_frame = input_data["raw_frame"]
         source_type = input_data["source_type"]
