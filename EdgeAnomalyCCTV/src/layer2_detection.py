@@ -92,9 +92,9 @@ class DetectionTrackingLayer:
         results = []
         yolo_results = self.model.track(
             raw_frame,
-            conf=self.conf_threshold,
+            conf=0.1,  # Lower confidence to let tracker receive low-confidence detections (0.1-0.3)
             persist=True,
-            tracker="bytetrack.yaml",
+            tracker="botsort.yaml",
             verbose=False,
         )
 
@@ -116,6 +116,12 @@ class DetectionTrackingLayer:
             track_id = int(track_id_tensor.item())
 
             self.track_life.update(track_id, [x1, y1, x2, y2], timestamp)
+
+            # Filter out low-confidence detections (below self.conf_threshold) from being propagated
+            # to downstream application layers, while still allowing the tracker to update them.
+            if conf < self.conf_threshold:
+                continue
+
             life = self.track_life.get_state(track_id)
 
             results.append({
