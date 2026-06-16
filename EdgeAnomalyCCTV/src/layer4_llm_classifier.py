@@ -67,9 +67,13 @@ class LLMClassifierLayer:
                 item = await asyncio.wait_for(self.queue.get(), timeout=0.5)
             except asyncio.TimeoutError:
                 continue
+            except asyncio.CancelledError:
+                break
+
             if self._stop:
                 self.queue.task_done()
                 break
+
             track_id = item.get("track_id")
             yolo_class = item.get("yolo_class", "unknown")
             yolo_conf = item.get("yolo_conf", 0.0)
@@ -107,6 +111,9 @@ class LLMClassifierLayer:
                         "yolo_conf": yolo_conf,
                         "vlm_processed": True,
                     }
+            except asyncio.CancelledError:
+                self.queue.task_done()
+                raise
             except Exception as exc:
                 print(f"[LLM] Error processing item {track_id}: {exc}")
                 traceback.print_exc()

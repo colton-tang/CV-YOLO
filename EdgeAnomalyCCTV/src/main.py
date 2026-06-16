@@ -92,8 +92,10 @@ async def main():
                 
                 render.process(filtering.track_state_db, frame_data["source_type"], raw_frame=frame_data["raw_frame"], tracks=tracks)
                 
-                # Press 'q' in the window to quit
+                # Press 'q' in the window or close it to quit
                 if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+                if render._window_created and cv2.getWindowProperty(render.WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
                     break
                     
                 # Yield control to let asyncio tasks run (like the LLM classifier)
