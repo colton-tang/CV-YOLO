@@ -1,8 +1,10 @@
 import asyncio
 import cv2
+import gc
 import sys
 import argparse
 from pathlib import Path
+import torch
 from constants import COCO_CLASSES
 from layer1_ingestion import IngestionLayer
 from layer2_detection import DetectionTrackingLayer
@@ -101,10 +103,31 @@ async def main():
         pass
     finally:
         # Cleanup
+        print("\n[MAIN] Shutting down...")
         if ingestion.cap:
             ingestion.cap.release()
         cv2.destroyAllWindows()
+
+        # Graceful LLM shutdown with timeout
+        classifier.shutdown()
         llm_task.cancel()
+        try:
+            await asyncio.wait_for(llm_task, timeout=3.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+
+        # Release model memory
+        try:
+            del classifier.model
+            del classifier.processor
+        except Exception:
+            pass
+        gc.collect()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        elif torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print("[MAIN] Shutdown complete.")
 
 if __name__ == "__main__":
     asyncio.run(main())

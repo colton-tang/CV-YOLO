@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import json
 import re
 import traceback
@@ -16,6 +17,13 @@ class LLMClassifierLayer:
         self.queue = queue
         self.known_classes = known_classes or []
         self.track_state_db = track_state_db if track_state_db is not None else {}
+        self._stop = False
+
+        # Daemon-thread executor so the process can exit even if inference is running.
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="vlm_infer",
+        )
 
         self.device = self._select_device()
         print(f"[LLM] Loading {self.MODEL_ID} on {self.device}...")
@@ -37,6 +45,14 @@ class LLMClassifierLayer:
             self.processor = None
             self.model = None
 
+    def shutdown(self):
+        """Signal the consumer to stop and release the inference executor."""
+        self._stop = True
+        try:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+
     @staticmethod
     def _select_device():
         if torch.cuda.is_available():
@@ -46,8 +62,14 @@ class LLMClassifierLayer:
         return "cpu"
 
     async def run(self):
-        while True:
-            item = await self.queue.get()
+        while not self._stop:
+            try:
+                item = await asyncio.wait_for(self.queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+            if self._stop:
+                self.queue.task_done()
+                break
             track_id = item.get("track_id")
             yolo_class = item.get("yolo_class", "unknown")
             yolo_conf = item.get("yolo_conf", 0.0)
@@ -135,8 +157,9 @@ class LLMClassifierLayer:
             },
         ]
 
-        # Run the heavy inference in a thread pool so the asyncio event loop stays responsive.
-        return await asyncio.to_thread(self._infer, messages)
+        # Run the heavy inference in a daemon-thread executor so the process can exit cleanly.
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, self._infer, messages)
 
     def _infer(self, messages):
         text = self.processor.apply_chat_template(
