@@ -1,5 +1,50 @@
+import hashlib
+import time
 from constants import LOW_CONFIDENCE_THRESHOLD
 from ultralytics import YOLO
+
+
+class TrackLifeManager:
+    """TrackLife Manager: birth_time, last_seen, trajectory, age, velocity."""
+
+    def __init__(self):
+        self.tracks = {}
+
+    def update(self, track_id, bbox, timestamp):
+        if track_id not in self.tracks:
+            self.tracks[track_id] = {
+                "birth_time": timestamp,
+                "last_seen": timestamp,
+                "trajectory": [bbox],
+                "age": 1,
+            }
+        else:
+            record = self.tracks[track_id]
+            record["last_seen"] = timestamp
+            record["trajectory"].append(bbox)
+            record["age"] += 1
+
+    def get_state(self, track_id):
+        record = self.tracks.get(track_id, {})
+        trajectory = record.get("trajectory", [])
+
+        velocity = 0.0
+        if len(trajectory) >= 2:
+            last = trajectory[-1]
+            prev = trajectory[-2]
+            cx_last = (last[0] + last[2]) / 2.0
+            cy_last = (last[1] + last[3]) / 2.0
+            cx_prev = (prev[0] + prev[2]) / 2.0
+            cy_prev = (prev[1] + prev[3]) / 2.0
+            velocity = ((cx_last - cx_prev) ** 2 + (cy_last - cy_prev) ** 2) ** 0.5
+
+        return {
+            "birth_time": record.get("birth_time"),
+            "last_seen": record.get("last_seen"),
+            "trajectory": trajectory,
+            "age": record.get("age", 0),
+            "velocity": velocity,
+        }
 
 
 class DetectionTrackingLayer:
@@ -18,6 +63,7 @@ class DetectionTrackingLayer:
         self.conf_threshold = conf_threshold
         self.known_classes = set(known_classes or [])
         self.model = YOLO(model_path)
+        self.track_life = TrackLifeManager()
 
         if "world" in model_path.lower():
             import yaml
@@ -34,40 +80,81 @@ class DetectionTrackingLayer:
         raw_frame = input_data["raw_frame"]
         source_type = input_data["source_type"]
         source_id = input_data["source_id"]
+        timestamp = input_data.get("timestamp", time.time())
 
-        boxes, classes, display_classes, confs = self._run_yolo(raw_frame)
-
-        results = []
         if source_type == "VIDEO":
-            tracks = self._run_tracking(boxes, classes, display_classes, confs)
-            for t in tracks:
-                results.append({
-                    "track_id": t["id"],
-                    "class": t["class"],
-                    "display_class": t.get("display_class", t["class"]),
-                    "conf": t["conf"],
-                    "bbox": t["bbox"],
-                    "age": t["age"],
-                    "velocity": t["velocity"],
-                    "source_type": source_type,
-                    "source_id": source_id,
-                    "raw_frame": raw_frame,
-                })
+            return self._process_video(raw_frame, source_id, timestamp)
         elif source_type == "IMAGE":
-            for i, (bbox, cls, display_cls, conf) in enumerate(zip(boxes, classes, display_classes, confs)):
-                synthetic_track_id = f"{source_id}_{i}"
-                results.append({
-                    "track_id": synthetic_track_id,
-                    "class": cls,
-                    "display_class": display_cls,
-                    "conf": conf,
-                    "bbox": bbox,
-                    "age": 1,
-                    "velocity": 0,
-                    "source_type": source_type,
-                    "source_id": source_id,
-                    "raw_frame": raw_frame,
-                })
+            return self._process_image(raw_frame, source_id)
+        return []
+
+    def _process_video(self, raw_frame, source_id, timestamp):
+        results = []
+        yolo_results = self.model.track(
+            raw_frame,
+            conf=self.conf_threshold,
+            persist=True,
+            tracker="bytetrack.yaml",
+            verbose=False,
+        )
+
+        if not yolo_results:
+            return results
+
+        result = yolo_results[0]
+        if result.boxes is None or result.boxes.id is None:
+            return results
+
+        names = result.names
+        boxes = result.boxes
+        for box, track_id_tensor in zip(boxes, boxes.id):
+            cls_id = int(box.cls[0].item())
+            detected_label = names[cls_id]
+            canonical_label = self._canonicalize_label(detected_label)
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            conf = float(box.conf[0].item())
+            track_id = int(track_id_tensor.item())
+
+            self.track_life.update(track_id, [x1, y1, x2, y2], timestamp)
+            life = self.track_life.get_state(track_id)
+
+            results.append({
+                "track_id": track_id,
+                "class": canonical_label,
+                "display_class": detected_label,
+                "conf": conf,
+                "bbox": [x1, y1, x2, y2],
+                "age": life["age"],
+                "velocity": life["velocity"],
+                "source_type": "VIDEO",
+                "source_id": source_id,
+                "raw_frame": raw_frame,
+                "birth_time": life["birth_time"],
+                "last_seen": life["last_seen"],
+                "trajectory": life["trajectory"],
+            })
+
+        return results
+
+    def _process_image(self, raw_frame, source_id):
+        results = []
+        boxes, classes, display_classes, confs = self._run_yolo(raw_frame)
+        synthetic_track_id = hashlib.md5(str(source_id).encode()).hexdigest()
+
+        for bbox, cls, display_cls, conf in zip(boxes, classes, display_classes, confs):
+            results.append({
+                "track_id": synthetic_track_id,
+                "class": cls,
+                "display_class": display_cls,
+                "conf": conf,
+                "bbox": bbox,
+                "age": 1,
+                "velocity": 0,
+                "source_type": "IMAGE",
+                "source_id": source_id,
+                "raw_frame": raw_frame,
+            })
+
         return results
 
     def _run_yolo(self, frame):
@@ -94,9 +181,6 @@ class DetectionTrackingLayer:
             confs.append(float(box.conf[0].item()))
 
         return boxes, classes, display_classes, confs
-
-    def _run_tracking(self, boxes, classes, display_classes, confs):
-        return []
 
     def _canonicalize_label(self, detected_label):
         alias_label = self.CLASS_ALIASES.get(detected_label)

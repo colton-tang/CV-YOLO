@@ -43,7 +43,8 @@ async def main():
     # Initialization based on mode
     if mode == "graph":
         print("\nStarting Static Image Detection (Graph mode)...")
-        ingestion = IngestionLayer(mode="IMAGE", source="benchmark_data/kitchen_person.jpg")
+        image_path = str(Path(__file__).resolve().parents[2] / "benchmark_data" / "kitchen_person.jpg")
+        ingestion = IngestionLayer(mode="IMAGE", source=image_path)
     else:
         print("\nStarting Real-time Camera Detection (Video mode)...")
         ingestion = IngestionLayer(mode="VIDEO", source="0")
@@ -75,8 +76,7 @@ async def main():
                 # Wait for LLM classification to finish for images
                 await filtering.llm_queue.join()
                 
-                active_track_ids = [t["track_id"] for t in tracks]
-                render.process(filtering.track_state_db, frame_data["source_type"], raw_frame=frame_data["raw_frame"], active_track_ids=active_track_ids)
+                render.process(filtering.track_state_db, frame_data["source_type"], raw_frame=frame_data["raw_frame"], tracks=tracks)
         else:
             # Video Mode Loop
             while True:
@@ -88,10 +88,7 @@ async def main():
                 tracks = detection.process(frame_data)
                 await filtering.process(tracks)
                 
-                # Extract track IDs that are active in the current frame
-                active_track_ids = [t["track_id"] for t in tracks]
-                
-                render.process(filtering.track_state_db, frame_data["source_type"], raw_frame=frame_data["raw_frame"], active_track_ids=active_track_ids)
+                render.process(filtering.track_state_db, frame_data["source_type"], raw_frame=frame_data["raw_frame"], tracks=tracks)
                 
                 # Press 'q' in the window to quit
                 if cv2.waitKey(1) & 0xFF == ord('q'):
