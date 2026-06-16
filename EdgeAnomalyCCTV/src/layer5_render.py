@@ -17,6 +17,7 @@ class RenderAlertLayer:
 
     def __init__(self):
         self._window_created = False
+        self._last_video_summary = None
 
     def _ensure_window(self):
         if not self._window_created:
@@ -74,7 +75,10 @@ class RenderAlertLayer:
                 cv2.imshow(self.WINDOW_NAME, overlay)
 
             outlier_count = sum(1 for s in tracking_state.values() if s.get("status") == "OUTLIER")
-            print(f"\n[VIDEO] Rendered {len(tracks)} tracks | outliers: {outlier_count}")
+            summary = (len(tracks), outlier_count)
+            if summary != self._last_video_summary:
+                print(f"\n[VIDEO] Rendered {len(tracks)} tracks | outliers: {outlier_count}")
+                self._last_video_summary = summary
 
         elif source_type == "IMAGE":
             print(f"\n--- Output Results (Source: {source_type}) ---")
