@@ -36,7 +36,9 @@ class RenderAlertLayer:
             state = tracking_state.get(track_id, {})
             status = state.get("status")
             cls = state.get("display_class") or state.get("class") or track.get("display_class") or track.get("class") or "unknown"
-            conf = state.get("confidence") or track.get("conf", 0.0)
+            conf = state.get("confidence")
+            if conf is None:
+                conf = track.get("conf", 0.0)
 
             color = self._get_color(status)
             x1, y1, x2, y2 = [int(v) for v in bbox]
@@ -49,7 +51,13 @@ class RenderAlertLayer:
             if x2 <= x1 or y2 <= y1:
                 continue
 
-            label = f"{cls} | {status or 'NEW'} | {conf:.2f}" if status else f"{cls} | NEW | {conf:.2f}"
+            # VLM confidence is a string (high/medium/low), YOLO confidence is a float.
+            if isinstance(conf, str):
+                conf_str = conf
+            else:
+                conf_str = f"{conf:.2f}"
+
+            label = f"{cls} | {status or 'NEW'} | {conf_str}"
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(frame, label, (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
