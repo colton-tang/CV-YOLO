@@ -6,13 +6,17 @@ from collections import deque
 class IngestionLayer:
     """Layer 1: Ingestion (Camera / Image → Frame Buffer)."""
 
-    def __init__(self, mode="VIDEO", source=None, buffer_seconds=2.0, target_fps=25.0):
+    def __init__(self, mode="VIDEO", source=None, buffer_seconds=2.0, target_fps=25.0, width=None, height=None):
         self.mode = mode
         self.source = self._normalize_source(source)
         self.source_id = str(self.source)
         self.cap = None
         self._opened = False
         self._is_live_stream = self._infer_is_live_stream(self.source)
+
+        # Optional capture resolution override
+        self.width = width
+        self.height = height
 
         # Ring buffer configuration (last N seconds at target_fps)
         self.buffer_seconds = buffer_seconds
@@ -45,6 +49,11 @@ class IngestionLayer:
         if self.cap is not None:
             self.cap.release()
         self.cap = cv2.VideoCapture(self.source)
+        if self.cap.isOpened():
+            if self.width is not None:
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            if self.height is not None:
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         self._opened = self.cap.isOpened()
         return self._opened
 

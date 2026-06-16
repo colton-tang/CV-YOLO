@@ -47,7 +47,7 @@ async def main():
         ingestion = IngestionLayer(mode="IMAGE", source=image_path)
     else:
         print("\nStarting Real-time Camera Detection (Video mode)...")
-        ingestion = IngestionLayer(mode="VIDEO", source="0")
+        ingestion = IngestionLayer(mode="VIDEO", source="0", width=640, height=480)
         if ingestion.mode == "VIDEO" and (not ingestion.cap or not ingestion.cap.isOpened()):
             print("\nError: Camera source '0' could not be opened.")
             print("Please check if:")
