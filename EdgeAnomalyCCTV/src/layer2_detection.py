@@ -145,9 +145,13 @@ class DetectionTrackingLayer:
     def _process_image(self, raw_frame, source_id):
         results = []
         boxes, classes, display_classes, confs = self._run_yolo(raw_frame)
-        synthetic_track_id = hashlib.md5(str(source_id).encode()).hexdigest()
+        base_track_id = hashlib.md5(str(source_id).encode()).hexdigest()
 
-        for bbox, cls, display_cls, conf in zip(boxes, classes, display_classes, confs):
+        for idx, (bbox, cls, display_cls, conf) in enumerate(zip(boxes, classes, display_classes, confs)):
+            # Give each detection in an image its own track id so the filter
+            # can evaluate every object independently (IMAGE mode has no
+            # temporal tracking anyway).
+            synthetic_track_id = f"{base_track_id}_{idx}"
             results.append({
                 "track_id": synthetic_track_id,
                 "class": cls,
