@@ -311,6 +311,17 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     images_with_detections = sum(1 for r in results if r["num_detections"] > 0)
     total_detections = sum(r["num_detections"] for r in results)
 
+    # Detector-level non-COCO rate (uses the raw detector label, not the VLM output).
+    detector_non_coco_count = sum(
+        1
+        for r in results
+        for t in r.get("tracks", [])
+        if is_ood(t.get("yolo_display_class") or t.get("yolo_class") or "")
+    )
+    detector_non_coco_rate = (
+        detector_non_coco_count / total_detections if total_detections else 0.0
+    )
+
     summary = {
         "benchmark_dir": str(benchmark_dir),
         "model": args.model,
@@ -319,6 +330,8 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         "total_images": total_images,
         "images_with_detections": images_with_detections,
         "total_detections": total_detections,
+        "detector_non_coco_count": detector_non_coco_count,
+        "detector_non_coco_rate": detector_non_coco_rate,
         "results": results,
     }
 
@@ -387,6 +400,8 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     print(f"Total images evaluated       : {total_images}")
     print(f"Images with detections       : {images_with_detections}")
     print(f"Total object detections      : {total_detections}")
+    print(f"Detector non-COCO detections : {detector_non_coco_count}")
+    print(f"Detector non-COCO rate       : {detector_non_coco_rate:.2%}")
     if args.evaluation_mode == "framework":
         gt = summary["ground_truth_metrics"]
         print(f"Images flagged with outlier  : {summary['images_with_outliers']}")

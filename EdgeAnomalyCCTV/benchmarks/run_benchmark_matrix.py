@@ -236,6 +236,8 @@ def _build_variant_record(variant: str, run_summary: dict, judge_report: dict | 
         "total_images": run_summary.get("total_images"),
         "images_with_detections": run_summary.get("images_with_detections"),
         "total_detections": run_summary.get("total_detections"),
+        "detector_non_coco_count": run_summary.get("detector_non_coco_count"),
+        "detector_non_coco_rate": run_summary.get("detector_non_coco_rate"),
     }
 
     if run_summary.get("evaluation_mode") == "framework":
@@ -260,6 +262,8 @@ def _build_variant_record(variant: str, run_summary: dict, judge_report: dict | 
     if judge_report is not None:
         record["judge_report_path"] = judge_report.get("judge_report_path")
         record["judge_backend"] = judge_report.get("judge_backend")
+        llm_metrics = judge_report.get("llm_judge_metrics", {}) or {}
+        record["judge_accuracy"] = llm_metrics.get("judge_accuracy")
 
     return record
 
@@ -356,6 +360,24 @@ def main() -> None:
     print(f"[MATRIX] Results: {output_dir}", flush=True)
     print(f"[MATRIX] Combined summary: {matrix_summary_path}", flush=True)
     print(f"{'=' * 60}", flush=True)
+
+    # Print a concise final table of the two key metrics.
+    print("\n[MATRIX] Key metrics per variant:")
+    print(f"{'Variant':<30} {'OOD Detection Rate':>20} {'LLM Judge Accuracy':>20}")
+    print("-" * 72)
+    for rec in variant_records:
+        variant = rec["variant"]
+        ood_rate = rec.get("detector_non_coco_rate")
+        if ood_rate is None:
+            # Fallback for older summaries without detector_non_coco_rate.
+            if rec.get("evaluation_mode") == "framework":
+                ood_rate = rec.get("outlier_recall")
+            else:
+                ood_rate = rec.get("detection_level_non_coco_rate")
+        judge_acc = rec.get("judge_accuracy")
+        ood_str = f"{ood_rate:.2%}" if ood_rate is not None else "N/A"
+        judge_str = f"{judge_acc:.2%}" if judge_acc is not None else "N/A"
+        print(f"{variant:<30} {ood_str:>20} {judge_str:>20}")
 
 
 if __name__ == "__main__":
