@@ -3,7 +3,7 @@
 This repository contains several related pipelines for object detection and
 anomaly detection in images and video:
 
-- **YOLO26n / YOLO-World local inference** (`src/inference.py`, `src/inference_world.py`)
+- **YOLO26n / YOLO-World local inference** (`tools/inference.py`, `tools/inference_world.py`) — optional standalone utilities for quick object-detection sanity checks.
 - **EdgeAnomalyCCTV** (`EdgeAnomalyCCTV/`) — a 5-layer edge pipeline with YOLOv8,
   gating filters, and a VLM outlier classifier.
 - **Benchmarking suite** (`EdgeAnomalyCCTV/benchmarks/`) — comprehensive OOD-class
@@ -216,23 +216,23 @@ Ground-truth metrics (folder labels):
 
 ---
 
-## YOLO26n / YOLO-World Local Inference
+## Tools — YOLO26n / YOLO-World Local Inference
 
 ### YOLO26n
 
 ```bash
 # Default sample image
-python src/inference.py
+python tools/inference.py
 
 # Your own image/video
-python src/inference.py --source path/to/image.jpg
-python src/inference.py --source path/to/video.mp4
+python tools/inference.py --source path/to/image.jpg
+python tools/inference.py --source path/to/video.mp4
 
 # Webcam
-python src/inference.py --source 0 --show
+python tools/inference.py --source 0 --show
 
 # Save annotated results
-python src/inference.py --source path/to/image.jpg --save
+python tools/inference.py --source path/to/image.jpg --save
 ```
 
 Saved results are written to `results/runs/detect/predict/`.
@@ -243,21 +243,21 @@ YOLO-World can detect **custom classes** defined by text, not just COCO's 80 cla
 
 ```bash
 # Default classes on the sample image
-python src/inference_world.py
+python tools/inference_world.py
 
 # Custom classes
-python src/inference_world.py \
+python tools/inference_world.py \
   --source path/to/image.jpg \
   --classes "glasses,laptop,coffee cup"
 
 # Video + save
-python src/inference_world.py \
+python tools/inference_world.py \
   --source path/to/video.mp4 \
   --classes "person,car,bicycle" \
   --save
 
 # Webcam
-python src/inference_world.py --source 0 --classes "person,phone" --show
+python tools/inference_world.py --source 0 --classes "person,phone" --show
 ```
 
 ### Common inference options
@@ -332,7 +332,7 @@ python EdgeAnomalyCCTV/src/main.py --mode graph \
 
 ```text
 .
-├── src/                              # YOLO26n / YOLO-World inference scripts
+├── tools/                            # Optional YOLO26n / YOLO-World inference scripts
 ├── EdgeAnomalyCCTV/
 │   ├── src/                          # 5-layer edge pipeline
 │   └── benchmarks/                   # OOD-class benchmark helpers + matrix runner
@@ -345,6 +345,7 @@ python EdgeAnomalyCCTV/src/main.py --mode graph \
 ├── weights/                          # Model weights
 │   ├── clip/                         # CLIP weights
 │   └── yolo/                         # YOLO .pt files
+├── src/                              # (reserved for future core source modules)
 ├── edgeanomaly-presentation/         # Vite + React presentation frontend
 ├── requirements.txt                  # Root Python dependencies
 └── README.md                         # This file

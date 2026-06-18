@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-YOLO-World (yolov8m-world) local inference script.
-
-YOLO-World is an open-vocabulary detector: you can define custom classes
-with text instead of being limited to COCO's 80 classes.
+YOLO26n local inference script.
 
 Usage:
-    python inference_world.py --source path/to/image.jpg --classes "person,car,dog"
-    python inference_world.py --source path/to/video.mp4 --classes "person,car" --save
+    python tools/inference.py --source path/to/image.jpg
+    python tools/inference.py --source path/to/video.mp4
+    python tools/inference.py --source 0  # webcam
 """
 
 import argparse
@@ -17,24 +15,18 @@ from ultralytics import YOLO
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run YOLO-World inference")
+    parser = argparse.ArgumentParser(description="Run YOLO26n inference")
     parser.add_argument(
         "--source",
         type=str,
         default="https://ultralytics.com/images/bus.jpg",
-        help="Image, video, directory, URL, or webcam index",
+        help="Image, video, directory, URL, or webcam index (default: bus.jpg)",
     )
     parser.add_argument(
         "--model",
         type=str,
-        default="weights/yolo/yolov8m-world.pt",
-        help="Path or name of the YOLO-World model (default: weights/yolo/yolov8m-world.pt)",
-    )
-    parser.add_argument(
-        "--classes",
-        type=str,
-        default="person,bus,car",
-        help="Comma-separated list of custom class names (default: person,bus,car)",
+        default="weights/yolo/yolo26n.pt",
+        help="Path or name of the YOLO26n model (default: weights/yolo/yolo26n.pt)",
     )
     parser.add_argument(
         "--imgsz",
@@ -69,13 +61,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    class_names = [c.strip() for c in args.classes.split(",") if c.strip()]
 
     print(f"Loading model: {args.model}")
     model = YOLO(args.model)
-
-    print(f"Setting custom classes: {class_names}")
-    model.set_classes(class_names)
 
     print(f"Running inference on: {args.source}")
     results = model.predict(
@@ -86,7 +74,7 @@ def main() -> None:
         save=args.save,
         show=args.show,
         project="results/runs",
-        name="predict_world",
+        name="predict",
         exist_ok=True,
         verbose=True,
     )
