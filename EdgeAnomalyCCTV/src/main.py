@@ -9,7 +9,6 @@ from constants import COCO_CLASSES
 from layer1_ingestion import IngestionLayer
 from layer2_detection import DetectionTrackingLayer
 from layer3_filtering import GateOutlierFilterLayer
-from layer4_llm_classifier import LLMClassifierLayer
 from layer5_render import RenderAlertLayer
 
 KNOWN_CLASSES = COCO_CLASSES
@@ -31,6 +30,17 @@ async def main():
             "For video mode: path to a video file, RTSP/HTTP URL, or camera index (e.g., 0). "
             "If omitted, graph mode defaults to the bundled benchmark image and video mode defaults to camera 0."
         ),
+    )
+    parser.add_argument(
+        "--detector-model",
+        type=str,
+        default="weights/yolo/yolov8n.pt",
+        help="Path to the YOLO detector weights to use.",
+    )
+    parser.add_argument(
+        "--skip-llm",
+        action="store_true",
+        help="Skip the LLM verification stage and render detector/gate results only.",
     )
     args, unknown = parser.parse_known_args()
 
@@ -73,13 +83,21 @@ async def main():
             print("3. macOS has camera permission enabled for this process.")
             return
 
-    detection = DetectionTrackingLayer(known_classes=KNOWN_CLASSES)
+    detection = DetectionTrackingLayer(model_path=args.detector_model, known_classes=KNOWN_CLASSES)
     filtering = GateOutlierFilterLayer(known_classes=KNOWN_CLASSES)
-    classifier = LLMClassifierLayer(queue=filtering.llm_queue, known_classes=KNOWN_CLASSES, track_state_db=filtering.track_state_db)
     render = RenderAlertLayer()
+    classifier = None
+    llm_task = None
 
-    # Start LLM consumer in background
-    llm_task = asyncio.create_task(classifier.run())
+    if not args.skip_llm:
+        from layer4_llm_classifier import LLMClassifierLayer
+
+        classifier = LLMClassifierLayer(
+            queue=filtering.llm_queue,
+            known_classes=KNOWN_CLASSES,
+            track_state_db=filtering.track_state_db,
+        )
+        llm_task = asyncio.create_task(classifier.run())
 
     # Processing Loop
     try:
@@ -90,8 +108,9 @@ async def main():
                 tracks = detection.process(frame_data)
                 await filtering.process(tracks)
                 
-                # Wait for LLM classification to finish for images
-                await filtering.llm_queue.join()
+                # Wait for LLM classification to finish for images when enabled.
+                if llm_task is not None:
+                    await filtering.llm_queue.join()
                 
                 render.process(filtering.track_state_db, frame_data["source_type"], raw_frame=frame_data["raw_frame"], tracks=tracks)
         else:
@@ -126,17 +145,19 @@ async def main():
         cv2.destroyAllWindows()
 
         # Graceful LLM shutdown with timeout
-        classifier.shutdown()
-        llm_task.cancel()
-        try:
-            await asyncio.wait_for(llm_task, timeout=3.0)
-        except (asyncio.CancelledError, asyncio.TimeoutError):
-            pass
+        if classifier is not None and llm_task is not None:
+            classifier.shutdown()
+            llm_task.cancel()
+            try:
+                await asyncio.wait_for(llm_task, timeout=3.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
 
         # Release model memory
         try:
-            del classifier.model
-            del classifier.processor
+            if classifier is not None:
+                del classifier.model
+                del classifier.processor
         except Exception:
             pass
         gc.collect()

@@ -71,7 +71,6 @@ VARIANTS = {
     "vlm_only": {
         "model": "kimi",
         "evaluation_mode": "vlm_only",
-        "skip_judge": True,
     },
 }
 

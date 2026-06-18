@@ -302,18 +302,27 @@ def _build_judge_messages_kimi(gt_class: str, first_vlm_decision: dict) -> tuple
     final_class = first_vlm_decision.get("final_class", "unknown")
     reason = first_vlm_decision.get("reason", "")
 
+    known_text = ", ".join(COCO_CLASSES)
+    gt_in_known = gt_class.lower().strip() in {c.lower() for c in COCO_CLASSES}
+    expected_status = "KNOWN" if gt_in_known else "OUTLIER"
+
     system_prompt = (
-        "You are a strict text-based classification evaluator. "
-        "Decide whether a predicted class label matches a ground-truth class label. "
-        "Respond with ONLY a JSON object, no reasoning, no markdown."
+        "You are a strict classification evaluator. You must decide whether a "
+        "KNOWN/OUTLIER decision is correct, using ONLY the provided known-classes "
+        "list. Do not rely on your own prior knowledge of COCO or any other dataset."
     )
 
     user_prompt = (
-        f"Ground-truth class: '{gt_class}'.\n"
-        f"Model classification: '{final_class}' (status={status}).\n"
-        f"Model reasoning: {reason}\n\n"
-        "Does the model's class label match the ground-truth class? "
-        "Be lenient with synonyms and descriptors (e.g., 'blue crab' matches 'crab').\n"
+        f"Known classes (closed set): {known_text}.\n\n"
+        f"Ground-truth class of the object in the image: '{gt_class}'.\n"
+        f"Because '{gt_class}' is {'IN' if gt_in_known else 'NOT in'} the known classes list, "
+        f"the CORRECT decision is: {expected_status}.\n\n"
+        f"Another model made this decision:\n"
+        f"  - status: {status}\n"
+        f"  - class: {final_class}\n"
+        f"  - reasoning: {reason}\n\n"
+        f"Question: Is '{status}' the correct decision? Also indicate whether the "
+        f"predicted class label matches the ground-truth class '{gt_class}'.\n"
         'Answer with ONLY this exact JSON format: '
         '{"correct": true or false, "class_match": true or false, "explanation": "one sentence"}'
     )

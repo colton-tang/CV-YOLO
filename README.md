@@ -106,9 +106,11 @@ Available variants:
 
 | Variant | Model | Mode |
 |---------|-------|------|
+| `yolov8n_only` | `yolov8n.pt` | Detector-only evaluation |
 | `yolov8n_framework` | `yolov8n.pt` | Full EdgeAnomalyCCTV framework |
 | `yolo_world_only` | `yolov8m-world.pt` | Detector-only evaluation |
 | `yolo_world_framework` | `yolov8m-world.pt` | Full framework with YOLO-World |
+| `vlm_only` | None | VLM-only evaluation |
 
 The combined summary is written to
 `benchmark_data/benchmark_matrix_results/benchmark_matrix_summary.json`.
@@ -121,9 +123,11 @@ The combined summary is written to
 [MATRIX] Key metrics per variant:
 Variant                          OOD Detection Rate   LLM Judge Accuracy
 ------------------------------------------------------------------------
+yolov8n_only                                  0.00%                0.00%
 yolov8n_framework                             0.00%               12.07%
 yolo_world_only                              76.92%                5.13%
 yolo_world_framework                         76.92%               16.67%
+vlm_only                                      —                    —
 ```
 
 #### Key Concepts & Definitions

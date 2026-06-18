@@ -166,17 +166,27 @@ def _resize_frame(frame: np.ndarray, max_size: int) -> np.ndarray:
     return cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
 
-def _encode_image_to_base64(image_path: Path, max_size: int) -> str | None:
-    """Read an image, resize it, and return a JPEG base64 data URL."""
+def _prepare_image(
+    image_path: Path, max_size: int, output_dir: Path
+) -> tuple[np.ndarray, str, Path] | None:
+    """Read an image, resize it, save a crop, and return (frame, data_url, crop_path)."""
     frame = cv2.imread(str(image_path))
     if frame is None:
         return None
     frame = _resize_frame(frame, max_size)
+
+    gt_class = image_path.parent.name.lower().strip()
+    crop_dir = output_dir / "crops" / gt_class
+    crop_dir.mkdir(parents=True, exist_ok=True)
+    crop_path = crop_dir / f"{image_path.stem}.jpg"
+    cv2.imwrite(str(crop_path), frame)
+
     success, buffer = cv2.imencode(".jpg", frame)
     if not success:
         return None
     b64 = base64.b64encode(buffer).decode("utf-8")
-    return f"data:image/jpeg;base64,{b64}"
+    data_url = f"data:image/jpeg;base64,{b64}"
+    return frame, data_url, crop_path
 
 
 def _build_messages(known_classes_text: str, image_data_url: str) -> list[dict]:
@@ -288,16 +298,18 @@ def _create_classifier(
     known_classes_text = ", ".join(COCO_CLASSES)
 
     def classify(image_path: Path) -> dict:
-        image_data_url = _encode_image_to_base64(image_path, args.max_image_size)
-        if image_data_url is None:
+        prepared = _prepare_image(image_path, args.max_image_size, Path(args.output_dir))
+        if prepared is None:
             return {
                 "type": "OUTLIER",
                 "class": "unknown",
                 "confidence": "low",
                 "reason": "Failed to read or encode image",
+                "crop_path": None,
             }
+        _, image_data_url, crop_path = prepared
         messages = _build_messages(known_classes_text, image_data_url)
-        return _call_kimi(
+        result = _call_kimi(
             messages,
             args.kimi_api_key,
             args.kimi_api_base,
@@ -305,6 +317,8 @@ def _create_classifier(
             args.kimi_user_agent,
             args.timeout,
         )
+        result["crop_path"] = str(crop_path)
+        return result
 
     return classify
 
@@ -414,6 +428,8 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                     "final_confidence": vlm_result.get("confidence", "low"),
                     "reason": vlm_result.get("reason", ""),
                     "is_ood_class": predicted_outlier,
+                    "bbox": [0, 0, 1, 1],
+                    "crop_path": vlm_result.get("crop_path"),
                 }
             ],
             "outlier_count": 1 if predicted_outlier else 0,
