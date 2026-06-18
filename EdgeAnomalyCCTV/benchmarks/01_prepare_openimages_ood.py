@@ -10,13 +10,13 @@ Usage:
     pip install fiftyone
 
     # Download up to 20 images per OOD class from OpenImages V7
-    python prepare_openimages_ood.py --backend openimages --max-per-class 20
+    python 01_prepare_openimages_ood.py --backend openimages --max-per-class 20
 
     # Use the tiny fallback URL set (no extra dependencies)
-    python prepare_openimages_ood.py --backend fallback
+    python 01_prepare_openimages_ood.py --backend fallback
 
     # Use your own local image folder (just validate it)
-    python prepare_openimages_ood.py --backend local --local-dir ./my_ood_images
+    python 01_prepare_openimages_ood.py --backend local --local-dir ./my_ood_images
 
 Output:
     benchmark_data/ood_openimages/
@@ -38,8 +38,12 @@ SRC_DIR = ROOT / "EdgeAnomalyCCTV" / "src"
 sys.path.insert(0, str(SRC_DIR))
 sys.path.insert(0, str(ROOT / "EdgeAnomalyCCTV" / "benchmarks"))
 
+import importlib  # noqa: E402
+
 from constants import COCO_CLASSES  # noqa: E402
-from ood_classes import OOD_CLASSES  # noqa: E402
+
+_ood_classes = importlib.import_module("00_ood_classes")
+OOD_CLASSES = _ood_classes.OOD_CLASSES
 
 DEFAULT_OUTPUT_DIR = ROOT / "benchmark_data" / "ood_openimages"
 

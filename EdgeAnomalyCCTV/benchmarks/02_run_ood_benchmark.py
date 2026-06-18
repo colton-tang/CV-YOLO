@@ -5,13 +5,13 @@ statistics.
 
 Usage:
     # Run on the default benchmark directory
-    python run_ood_benchmark.py
+    python 02_run_ood_benchmark.py
 
     # Run on a custom directory of images
-    python run_ood_benchmark.py --benchmark-dir ./my_ood_images
+    python 02_run_ood_benchmark.py --benchmark-dir ./my_ood_images
 
     # Save annotated images to a results folder
-    python run_ood_benchmark.py --save-visualizations --output-dir ./ood_results
+    python 02_run_ood_benchmark.py --save-visualizations --output-dir ./ood_results
 """
 
 import argparse
@@ -30,13 +30,17 @@ SRC_DIR = ROOT / "EdgeAnomalyCCTV" / "src"
 sys.path.insert(0, str(SRC_DIR))
 sys.path.insert(0, str(ROOT / "EdgeAnomalyCCTV" / "benchmarks"))
 
+import importlib  # noqa: E402
+
 from constants import COCO_CLASSES  # noqa: E402
 from layer1_ingestion import IngestionLayer  # noqa: E402
 from layer2_detection import DetectionTrackingLayer  # noqa: E402
 from layer3_filtering import GateOutlierFilterLayer  # noqa: E402
 from layer4_llm_classifier import LLMClassifierLayer  # noqa: E402
 from layer5_render import RenderAlertLayer  # noqa: E402
-from ood_classes import is_ood  # noqa: E402
+
+_ood_classes = importlib.import_module("00_ood_classes")
+is_ood = _ood_classes.is_ood
 
 DEFAULT_BENCHMARK_DIR = ROOT / "benchmark_data" / "ood_openimages"
 DEFAULT_OUTPUT_DIR = ROOT / "EdgeAnomalyCCTV" / "ood_results"
@@ -108,7 +112,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     image_paths = _collect_image_paths(benchmark_dir)
     if not image_paths:
         print(f"ERROR: no images found in {benchmark_dir}")
-        print("Prepare a benchmark first with prepare_openimages_ood.py")
+        print("Prepare a benchmark first with 01_prepare_openimages_ood.py")
         sys.exit(1)
 
     print(f"Benchmark directory: {benchmark_dir}")

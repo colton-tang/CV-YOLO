@@ -16,18 +16,18 @@ Two judgement modes are supported:
 
 Usage:
     # Deterministic comparison only (fast, no API/model load)
-    python judge_vlm_correctness.py \
+    python 03_judge_vlm_correctness.py \
         --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
         --skip-llm-judge
 
     # Judge with a local VLM
-    python judge_vlm_correctness.py \
+    python 03_judge_vlm_correctness.py \
         --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
         --judge-backend local \
         --judge-model Qwen/Qwen3-VL-2B-Instruct
 
     # Judge with the Kimi API (credentials are read from .env by default)
-    python judge_vlm_correctness.py \
+    python 03_judge_vlm_correctness.py \
         --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
         --judge-backend kimi
 
@@ -105,7 +105,7 @@ def parse_args() -> argparse.Namespace:
         "--summary",
         type=str,
         required=True,
-        help="Path to ood_benchmark_summary.json produced by run_ood_benchmark.py",
+        help="Path to ood_benchmark_summary.json produced by 02_run_ood_benchmark.py",
     )
     parser.add_argument(
         "--judge-backend",

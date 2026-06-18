@@ -138,9 +138,10 @@ Helper scripts live in `EdgeAnomalyCCTV/benchmarks/`:
 
 | File | Purpose |
 |------|---------|
-| `ood_classes.py` | Curated list of OOD classes and helpers. |
-| `prepare_openimages_ood.py` | Download / prepare an OOD image benchmark. |
-| `run_ood_benchmark.py` | Run the full pipeline on the benchmark and report statistics. |
+| `00_ood_classes.py` | Curated list of OOD classes and helpers. |
+| `01_prepare_openimages_ood.py` | Download / prepare an OOD image benchmark. |
+| `02_run_ood_benchmark.py` | Run the full pipeline on the benchmark and report statistics. |
+| `03_judge_vlm_correctness.py` | Independently judge VLM decisions (deterministic or LLM-as-a-judge). |
 
 #### How to run it
 
@@ -158,7 +159,7 @@ Uses **Caltech101** via `torchvision` and finishes in a few minutes.
 
 ```bash
 # 1. Prepare a small 18-image benchmark (6 OOD classes, 3 images each)
-python EdgeAnomalyCCTV/benchmarks/prepare_openimages_ood.py \
+python EdgeAnomalyCCTV/benchmarks/01_prepare_openimages_ood.py \
     --backend torchvision \
     --torchvision-dataset Caltech101 \
     --max-per-class 3 \
@@ -166,7 +167,7 @@ python EdgeAnomalyCCTV/benchmarks/prepare_openimages_ood.py \
     --classes octopus,lobster,scorpion,helicopter,crab,starfish
 
 # 2. Run the EdgeAnomalyCCTV pipeline on it
-python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
+python EdgeAnomalyCCTV/benchmarks/02_run_ood_benchmark.py \
     --benchmark-dir benchmark_data/ood_openimages_small \
     --output-dir benchmark_data/ood_results_small
 ```
@@ -178,12 +179,12 @@ Results are saved to `benchmark_data/ood_results_small/ood_benchmark_summary.jso
 ```bash
 pip install fiftyone
 
-python EdgeAnomalyCCTV/benchmarks/prepare_openimages_ood.py \
+python EdgeAnomalyCCTV/benchmarks/01_prepare_openimages_ood.py \
     --backend openimages \
     --max-per-class 20 \
     --output-dir benchmark_data/ood_openimages
 
-python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
+python EdgeAnomalyCCTV/benchmarks/02_run_ood_benchmark.py \
     --benchmark-dir benchmark_data/ood_openimages \
     --output-dir benchmark_data/ood_results
 ```
@@ -200,12 +201,12 @@ Organize your images in folders named by class:
 ```
 
 ```bash
-python EdgeAnomalyCCTV/benchmarks/prepare_openimages_ood.py \
+python EdgeAnomalyCCTV/benchmarks/01_prepare_openimages_ood.py \
     --backend local \
     --local-dir /path/to/your/ood_images \
     --output-dir benchmark_data/ood_local
 
-python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
+python EdgeAnomalyCCTV/benchmarks/02_run_ood_benchmark.py \
     --benchmark-dir benchmark_data/ood_local \
     --output-dir benchmark_data/ood_results_local
 ```
@@ -221,7 +222,7 @@ python EdgeAnomalyCCTV/src/main.py --mode graph \
 
 #### Interpreting results
 
-`run_ood_benchmark.py` prints a summary like this:
+`02_run_ood_benchmark.py` prints a summary like this:
 
 ```text
 Total images evaluated       : 18
@@ -261,7 +262,7 @@ Ground-truth metrics (folder labels):
 
 #### Optional: judge VLM decisions
 
-`judge_vlm_correctness.py` evaluates each saved crop against the ground-truth
+`03_judge_vlm_correctness.py` evaluates each saved crop against the ground-truth
 folder name.  It always reports two deterministic metrics:
 
 * **Class-match accuracy** — does the VLM's `final_class` exactly match the
@@ -272,7 +273,7 @@ folder name.  It always reports two deterministic metrics:
 Run the fast deterministic comparison without loading any model:
 
 ```bash
-python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
+python EdgeAnomalyCCTV/benchmarks/03_judge_vlm_correctness.py \
     --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
     --skip-llm-judge
 ```
@@ -283,7 +284,7 @@ Two backends are supported: a local Qwen3-VL model or the Kimi API.
 First make sure the benchmark was run with `--save-crops`:
 
 ```bash
-python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
+python EdgeAnomalyCCTV/benchmarks/02_run_ood_benchmark.py \
     --benchmark-dir benchmark_data/ood_openimages_small \
     --output-dir benchmark_data/ood_results_small \
     --save-crops
@@ -292,7 +293,7 @@ python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
 Then run the judge with a local model:
 
 ```bash
-python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
+python EdgeAnomalyCCTV/benchmarks/03_judge_vlm_correctness.py \
     --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
     --judge-backend local \
     --judge-model Qwen/Qwen3-VL-2B-Instruct
@@ -301,7 +302,7 @@ python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
 Or run the judge with the Kimi API:
 
 ```bash
-python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
+python EdgeAnomalyCCTV/benchmarks/03_judge_vlm_correctness.py \
     --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
     --judge-backend kimi
 ```
