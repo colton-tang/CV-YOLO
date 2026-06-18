@@ -259,10 +259,28 @@ Ground-truth metrics (folder labels):
 - **FP** — COCO object wrongly flagged as OUTLIER
 - **FN** — OOD object wrongly flagged as KNOWN
 
-#### Optional: use a second VLM as a judge
+#### Optional: judge VLM decisions
 
-If you want an independent model (e.g. Kimi / a larger Qwen-VL) to double-check
-the first VLM's decisions, first re-run the benchmark with crops saved:
+`judge_vlm_correctness.py` evaluates each saved crop against the ground-truth
+folder name.  It always reports two deterministic metrics:
+
+* **Class-match accuracy** — does the VLM's `final_class` exactly match the
+  benchmark folder name (ground-truth class)?
+* **Decision accuracy / precision / recall / F1** — is the `KNOWN`/`OUTLIER`
+  decision correct relative to the ground-truth OOD status?
+
+Run the fast deterministic comparison without loading any model:
+
+```bash
+python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
+    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
+    --skip-llm-judge
+```
+
+You can also ask a second VLM to double-check the first VLM's decisions.
+Two backends are supported: a local Qwen3-VL model or the Kimi API.
+
+First make sure the benchmark was run with `--save-crops`:
 
 ```bash
 python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
@@ -271,26 +289,32 @@ python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
     --save-crops
 ```
 
-Then run the judge:
+Then run the judge with a local model:
 
 ```bash
 python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
-    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json
+    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
+    --judge-backend local \
+    --judge-model Qwen/Qwen3-VL-2B-Instruct
 ```
 
-The judge loads each saved crop and asks a second VLM whether the first VLM's
-`KNOWN`/`OUTLIER` decision is correct.  It writes a report to
-`vlm_judgement_report.json`.
+Or run the judge with the Kimi API:
+
+```bash
+export KIMI_API_KEY="sk-..."
+export KIMI_API_BASE="https://api.kimi.com/coding"
+export KIMI_MODEL_NAME="kimi-code"
+python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
+    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
+    --judge-backend kimi
+```
+
+The report is written to `vlm_judgement_report.json` next to the summary file.
 
 > **Note:** a small local judge (e.g. Qwen3-VL-2B) can be unreliable.  For
-> trustworthy human-like review, use a larger model such as
-> `Qwen/Qwen3-VL-7B-Instruct` or the Kimi API:
->
-> ```bash
-> python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
->     --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
->     --judge-model Qwen/Qwen3-VL-7B-Instruct
-> ```
+> trustworthy human-like review, use a larger model or the Kimi API.
+> `kimi-code` is a reasoning model, so the script sets a large token budget
+> to accommodate its reasoning before the final JSON answer.
 
 ---
 

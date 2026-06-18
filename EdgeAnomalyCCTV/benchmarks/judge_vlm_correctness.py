@@ -1,32 +1,56 @@
 #!/usr/bin/env python3
 """
-Judge the correctness of EdgeAnomalyCCTV's VLM decisions using a second VLM.
+Judge the correctness of EdgeAnomalyCCTV's VLM decisions.
 
-This acts as a meta-evaluator: a judge model looks at the same crop and the
-first VLM's decision, then says whether that decision is correct.
+Two judgement modes are supported:
+
+1. Deterministic comparison (no LLM call):
+   - Compare the benchmark folder name (ground-truth class) with the
+     VLM-generated `final_class` and report class-match accuracy.
+   - Compare the KNOWN/OUTLIER decision with the ground-truth OOD status
+     and report decision-level accuracy / precision / recall / F1.
+
+2. LLM-as-a-judge:
+   - A second VLM (local Qwen3-VL or Kimi API) looks at the crop and the
+     first VLM's decision, then says whether that decision is correct.
 
 Usage:
-    # Judge a benchmark that was run with --save-crops
-    python judge_vlm_correctness.py \
-        --summary benchmark_data/ood_results_small/ood_benchmark_summary.json
-
-    # Use a different judge model
+    # Deterministic comparison only (fast, no API/model load)
     python judge_vlm_correctness.py \
         --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
-        --judge-model Qwen/Qwen3-VL-7B-Instruct
+        --skip-llm-judge
+
+    # Judge with a local VLM
+    python judge_vlm_correctness.py \
+        --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
+        --judge-backend local \
+        --judge-model Qwen/Qwen3-VL-2B-Instruct
+
+    # Judge with the Kimi API
+    export KIMI_API_KEY="sk-..."
+    export KIMI_API_BASE="https://api.kimi.com/coding"
+    export KIMI_MODEL_NAME="kimi-code"
+    python judge_vlm_correctness.py \
+        --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
+        --judge-backend kimi
 
 Output:
     {output_dir}/vlm_judgement_report.json
 """
 
 import argparse
+import base64
 import json
+import os
 import re
 import sys
 import traceback
 from pathlib import Path
+from typing import Callable
 
 import cv2
+import numpy as np
+import requests
 import torch
 from PIL import Image
 from qwen_vl_utils import process_vision_info
@@ -40,6 +64,11 @@ sys.path.insert(0, str(SRC_DIR))
 from constants import COCO_CLASSES  # noqa: E402
 
 
+KIMI_DEFAULT_BASE = "https://api.kimi.com/coding"
+KIMI_DEFAULT_MODEL = "kimi-code"
+KIMI_DEFAULT_USER_AGENT = "claude-code/0.1.0"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Judge VLM outlier decisions")
     parser.add_argument(
@@ -49,10 +78,41 @@ def parse_args() -> argparse.Namespace:
         help="Path to ood_benchmark_summary.json produced by run_ood_benchmark.py",
     )
     parser.add_argument(
+        "--judge-backend",
+        type=str,
+        choices=["local", "kimi"],
+        default="local",
+        help="Backend for the judge VLM (default: local)",
+    )
+    parser.add_argument(
         "--judge-model",
         type=str,
         default="Qwen/Qwen3-VL-2B-Instruct",
-        help="VLM model to use as judge (default: Qwen/Qwen3-VL-2B-Instruct)",
+        help="Local VLM model to use as judge (default: Qwen/Qwen3-VL-2B-Instruct)",
+    )
+    parser.add_argument(
+        "--kimi-api-key",
+        type=str,
+        default=os.getenv("KIMI_API_KEY"),
+        help="Kimi API key (default: KIMI_API_KEY environment variable)",
+    )
+    parser.add_argument(
+        "--kimi-api-base",
+        type=str,
+        default=os.getenv("KIMI_API_BASE", KIMI_DEFAULT_BASE),
+        help=f"Kimi API base URL (default: {KIMI_DEFAULT_BASE})",
+    )
+    parser.add_argument(
+        "--kimi-model-name",
+        type=str,
+        default=os.getenv("KIMI_MODEL_NAME", KIMI_DEFAULT_MODEL),
+        help=f"Kimi model name (default: {KIMI_DEFAULT_MODEL})",
+    )
+    parser.add_argument(
+        "--kimi-user-agent",
+        type=str,
+        default=os.getenv("KIMI_USER_AGENT", KIMI_DEFAULT_USER_AGENT),
+        help=f"User-Agent header for Kimi API (default: {KIMI_DEFAULT_USER_AGENT})",
     )
     parser.add_argument(
         "--output-dir",
@@ -64,7 +124,12 @@ def parse_args() -> argparse.Namespace:
         "--device",
         type=str,
         default=None,
-        help="Device for judge model (cpu/cuda/mps). Auto-detected if omitted.",
+        help="Device for local judge model (cpu/cuda/mps). Auto-detected if omitted.",
+    )
+    parser.add_argument(
+        "--skip-llm-judge",
+        action="store_true",
+        help="Skip the LLM-as-a-judge step and only compute deterministic metrics",
     )
     return parser.parse_args()
 
@@ -79,8 +144,8 @@ def _select_device(preferred: str | None) -> str:
     return "cpu"
 
 
-def _load_judge_model(model_id: str, device: str):
-    print(f"[JUDGE] Loading judge model {model_id} on {device}...")
+def _load_local_judge(model_id: str, device: str):
+    print(f"[JUDGE] Loading local judge model {model_id} on {device}...")
     dtype = torch.float16 if device != "cpu" else torch.float32
     processor = AutoProcessor.from_pretrained(model_id)
     model = Qwen3VLForConditionalGeneration.from_pretrained(
@@ -90,11 +155,11 @@ def _load_judge_model(model_id: str, device: str):
         low_cpu_mem_usage=True,
     ).to(device)
     model.eval()
-    print("[JUDGE] Judge model loaded.")
+    print("[JUDGE] Local judge model loaded.")
     return processor, model
 
 
-def _build_judge_messages(crop_bgr, gt_class: str, first_vlm_decision: dict, known_classes: list):
+def _build_judge_messages_local(crop_bgr, gt_class: str, first_vlm_decision: dict, known_classes: list):
     image = Image.fromarray(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)).convert("RGB")
 
     status = first_vlm_decision["status"]
@@ -161,7 +226,7 @@ def _parse_judge_response(response: str) -> dict:
     }
 
 
-def _run_judge(processor, model, device, messages) -> dict:
+def _run_local_judge(processor, model, device, messages) -> dict:
     text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     image_inputs, video_inputs = process_vision_info(messages)
     inputs = processor(
@@ -188,8 +253,129 @@ def _run_judge(processor, model, device, messages) -> dict:
     return _parse_judge_response(response)
 
 
+def _encode_image_to_base64(crop_bgr: np.ndarray) -> str:
+    success, buffer = cv2.imencode(".jpg", crop_bgr)
+    if not success:
+        raise RuntimeError("Failed to encode crop to JPEG")
+    return base64.b64encode(buffer).decode("utf-8")
+
+
+def _build_judge_messages_kimi(gt_class: str, first_vlm_decision: dict) -> tuple[str, str]:
+    status = first_vlm_decision["status"]
+    final_class = first_vlm_decision["final_class"]
+    reason = first_vlm_decision.get("reason", "")
+
+    system_prompt = (
+        "You are a strict visual-classification evaluator. "
+        "Look at the image and decide whether the model's class label matches the "
+        "ground-truth class. Respond with ONLY a JSON object, no reasoning, no markdown."
+    )
+
+    user_prompt = (
+        f"Ground-truth class: '{gt_class}'.\n"
+        f"Model classification: '{final_class}' (status={status}).\n"
+        f"Model reasoning: {reason}\n\n"
+        'Answer with ONLY this exact JSON format: '
+        '{"correct": true or false, "class_match": true or false, "explanation": "one sentence"}'
+    )
+
+    return system_prompt, user_prompt
+
+
+def _call_kimi_judge(
+    api_key: str,
+    base_url: str,
+    model_name: str,
+    user_agent: str,
+    system_prompt: str,
+    user_prompt: str,
+    base64_image: str,
+) -> dict:
+    url = f"{base_url.rstrip('/')}/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "User-Agent": user_agent,
+    }
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                    },
+                ],
+            },
+        ],
+        "max_tokens": 2048,
+    }
+
+    response = requests.post(url, headers=headers, json=payload, timeout=60)
+    response.raise_for_status()
+    data = response.json()
+    content = data["choices"][0]["message"]["content"]
+    return _parse_judge_response(content)
+
+
+def _create_judge(args: argparse.Namespace):
+    """Return a callable judge_fn(crop_bgr, gt_class, track) -> dict."""
+    if args.skip_llm_judge:
+        return None
+
+    if args.judge_backend == "local":
+        device = _select_device(args.device)
+        processor, model = _load_local_judge(args.judge_model, device)
+
+        def judge_fn(crop_bgr, gt_class: str, track: dict) -> dict:
+            messages = _build_judge_messages_local(
+                crop_bgr, gt_class, track, COCO_CLASSES
+            )
+            return _run_local_judge(processor, model, device, messages)
+
+        return judge_fn
+
+    if args.judge_backend == "kimi":
+        if not args.kimi_api_key:
+            print(
+                "ERROR: --kimi-api-key or KIMI_API_KEY environment variable is required "
+                "for Kimi backend"
+            )
+            sys.exit(1)
+
+        print(
+            f"[JUDGE] Using Kimi API judge at {args.kimi_api_base} "
+            f"(model={args.kimi_model_name})"
+        )
+
+        def judge_fn(crop_bgr, gt_class: str, track: dict) -> dict:
+            system_prompt, user_prompt = _build_judge_messages_kimi(gt_class, track)
+            base64_image = _encode_image_to_base64(crop_bgr)
+            return _call_kimi_judge(
+                api_key=args.kimi_api_key,
+                base_url=args.kimi_api_base,
+                model_name=args.kimi_model_name,
+                user_agent=args.kimi_user_agent,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                base64_image=base64_image,
+            )
+
+        return judge_fn
+
+    raise ValueError(f"Unknown judge backend: {args.judge_backend}")
+
+
+def _normalize(label: str) -> str:
+    return label.lower().strip()
+
+
 def _is_known_class(label: str, known_classes: set) -> bool:
-    return label.lower().strip() in known_classes
+    return _normalize(label) in known_classes
 
 
 def main() -> None:
@@ -208,13 +394,23 @@ def main() -> None:
     known_classes = set(c.lower() for c in summary.get("known_classes", COCO_CLASSES))
     results = summary.get("results", [])
 
-    device = _select_device(args.device)
-    processor, model = _load_judge_model(args.judge_model, device)
+    judge_fn = _create_judge(args)
 
     judgements = []
     total = 0
-    correct = 0
+
+    # Deterministic class-match counts
+    class_match_count = 0
+
+    # Deterministic KNOWN/OUTLIER decision counts
+    decision_correct = 0
     tp = tn = fp = fn = 0
+
+    # LLM judge agreement counts
+    judge_total = 0
+    judge_correct_count = 0
+    judge_agrees_with_class_match = 0
+    judge_agrees_with_decision = 0
 
     for img_result in results:
         gt_class = img_result.get("ground_truth_class", "unknown")
@@ -232,20 +428,25 @@ def main() -> None:
                 continue
 
             status = track.get("status", "UNKNOWN")
+            final_class = track.get("final_class", "unknown")
             first_is_known = status == "KNOWN"
 
-            messages = _build_judge_messages(crop, gt_class, track, summary.get("known_classes", COCO_CLASSES))
-            try:
-                judgement = _run_judge(processor, model, device, messages)
-            except Exception as exc:
-                print(f"[JUDGE] error on track {track['track_id']}: {exc}")
-                traceback.print_exc()
-                continue
+            # Deterministic class-match metric
+            normalized_final = _normalize(final_class)
+            normalized_gt = _normalize(gt_class)
+            class_match = normalized_final == normalized_gt and normalized_final not in {"", "unknown"}
 
-            is_correct = judgement["correct"]
+            # Deterministic KNOWN/OUTLIER decision correctness
+            decision_is_correct = (
+                (status == "OUTLIER" and not gt_is_known)
+                or (status == "KNOWN" and gt_is_known)
+            )
+
             total += 1
-            if is_correct:
-                correct += 1
+            if class_match:
+                class_match_count += 1
+            if decision_is_correct:
+                decision_correct += 1
 
             # Confusion matrix relative to OUTLIER as the positive class.
             if first_is_known and gt_is_known:
@@ -257,42 +458,93 @@ def main() -> None:
             else:
                 tp += 1
 
-            judgements.append({
+            entry = {
                 "image": img_result.get("relative"),
                 "track_id": track["track_id"],
                 "ground_truth_class": gt_class,
                 "ground_truth_is_known": gt_is_known,
                 "first_vlm_status": status,
-                "judge_correct": is_correct,
-                "judge_explanation": judgement["explanation"],
+                "first_vlm_class": final_class,
+                "class_match": class_match,
+                "decision_correct": decision_is_correct,
                 "crop_path": crop_path,
-            })
+                "judge_correct": None,
+                "judge_class_match": None,
+                "judge_explanation": None,
+            }
+
+            if judge_fn is not None:
+                try:
+                    judgement = judge_fn(crop, gt_class, track)
+                except Exception as exc:
+                    print(f"[JUDGE] error on track {track['track_id']}: {exc}")
+                    traceback.print_exc()
+                    judgement = {"correct": False, "explanation": f"ERROR: {exc}"}
+
+                judge_total += 1
+                judge_correct = bool(judgement.get("correct", False))
+                judge_class_match = bool(judgement.get("class_match", judge_correct))
+                judge_explanation = judgement.get("explanation", "")
+
+                if judge_correct:
+                    judge_correct_count += 1
+                if judge_class_match == class_match:
+                    judge_agrees_with_class_match += 1
+                if judge_correct == decision_is_correct:
+                    judge_agrees_with_decision += 1
+
+                entry["judge_correct"] = judge_correct
+                entry["judge_class_match"] = judge_class_match
+                entry["judge_explanation"] = judge_explanation
+
+            judgements.append(entry)
 
             print(
                 f"[JUDGE] {img_result.get('relative')} | "
-                f"gt={gt_class} | first={status} | judge_correct={is_correct}"
+                f"gt={gt_class} | first={status}/{final_class} | "
+                f"class_match={class_match} | decision_correct={decision_is_correct}"
+                + (
+                    f" | judge_correct={entry['judge_correct']}"
+                    if entry["judge_correct"] is not None
+                    else ""
+                )
             )
 
-    accuracy = correct / total if total else 0.0
+    # Deterministic metrics
+    class_match_accuracy = class_match_count / total if total else 0.0
+    decision_accuracy = decision_correct / total if total else 0.0
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
 
+    # LLM judge metrics
+    judge_accuracy = judge_correct_count / judge_total if judge_total else None
+    judge_class_agreement = judge_agrees_with_class_match / judge_total if judge_total else None
+    judge_decision_agreement = judge_agrees_with_decision / judge_total if judge_total else None
+
     report = {
         "summary_file": str(summary_path),
-        "judge_model": args.judge_model,
+        "judge_backend": "none" if args.skip_llm_judge else args.judge_backend,
+        "judge_model": args.judge_model if args.judge_backend == "local" else args.kimi_model_name,
+        "kimi_api_base": args.kimi_api_base if args.judge_backend == "kimi" else None,
         "total_judged": total,
-        "correct": correct,
-        "accuracy": accuracy,
-        "confusion_matrix": {
-            "tp": tp,
-            "tn": tn,
-            "fp": fp,
-            "fn": fn,
+        "deterministic_metrics": {
+            "class_match_count": class_match_count,
+            "class_match_accuracy": class_match_accuracy,
+            "decision_correct_count": decision_correct,
+            "decision_accuracy": decision_accuracy,
+            "confusion_matrix": {"tp": tp, "tn": tn, "fp": fp, "fn": fn},
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1,
         },
-        "precision": precision,
-        "recall": recall,
-        "f1_score": f1,
+        "llm_judge_metrics": {
+            "judge_total": judge_total,
+            "judge_correct_count": judge_correct_count,
+            "judge_accuracy": judge_accuracy,
+            "judge_class_agreement": judge_class_agreement,
+            "judge_decision_agreement": judge_decision_agreement,
+        } if judge_fn is not None else None,
         "judgements": judgements,
     }
 
@@ -303,26 +555,33 @@ def main() -> None:
     print(f"\n{'='*60}")
     print("VLM JUDGEMENT REPORT")
     print(f"{'='*60}")
-    print(f"Judge model       : {args.judge_model}")
+    print(f"Judge backend     : {report['judge_backend']}")
+    if report['judge_backend'] != "none":
+        print(f"Judge model       : {report['judge_model']}")
     print(f"Total judged      : {total}")
-    print(f"Correct decisions : {correct}")
-    print(f"Accuracy          : {accuracy:.2%}")
+    print(f"Class-match acc.  : {class_match_accuracy:.2%} ({class_match_count}/{total})")
+    print(f"Decision accuracy : {decision_accuracy:.2%} ({decision_correct}/{total})")
     print(f"Precision (OUTLIER): {precision:.2%}")
     print(f"Recall (OUTLIER)  : {recall:.2%}")
     print(f"F1-score          : {f1:.2%}")
     print(f"Confusion matrix  : TP={tp} TN={tn} FP={fp} FN={fn}")
+    if report["llm_judge_metrics"] is not None:
+        print(f"\nLLM judge accuracy       : {judge_accuracy:.2%}" if judge_accuracy is not None else "")
+        print(f"LLM agrees w/ class match: {judge_class_agreement:.2%}" if judge_class_agreement is not None else "")
+        print(f"LLM agrees w/ decision   : {judge_decision_agreement:.2%}" if judge_decision_agreement is not None else "")
     print(f"Report saved to   : {report_path}")
 
-    # Release model memory
-    try:
-        del model
-        del processor
-    except Exception:
-        pass
-    if torch.backends.mps.is_available():
-        torch.mps.empty_cache()
-    elif torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    # Release model memory if local backend was used
+    if args.judge_backend == "local" and not args.skip_llm_judge:
+        try:
+            import gc
+            gc.collect()
+        except Exception:
+            pass
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        elif torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
