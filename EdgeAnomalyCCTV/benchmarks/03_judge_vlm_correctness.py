@@ -36,6 +36,7 @@ Output:
 """
 
 import argparse
+import asyncio
 import base64
 import json
 import os
@@ -161,6 +162,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip the LLM-as-a-judge step and only compute deterministic metrics",
     )
+    parser.add_argument(
+        "--judge-concurrency",
+        type=int,
+        default=None,
+        help="Max concurrent LLM judge calls. Default: 5 for kimi, 1 for local.",
+    )
     return parser.parse_args()
 
 
@@ -192,8 +199,8 @@ def _load_local_judge(model_id: str, device: str):
 def _build_judge_messages_local(crop_bgr, gt_class: str, first_vlm_decision: dict, known_classes: list):
     image = Image.fromarray(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)).convert("RGB")
 
-    status = first_vlm_decision["status"]
-    final_class = first_vlm_decision["final_class"]
+    status = first_vlm_decision.get("status", "UNKNOWN")
+    final_class = first_vlm_decision.get("final_class", "unknown")
     reason = first_vlm_decision.get("reason", "")
     yolo_class = first_vlm_decision.get("yolo_class", "unknown")
     yolo_conf = first_vlm_decision.get("yolo_conf", 0.0)
@@ -291,20 +298,22 @@ def _encode_image_to_base64(crop_bgr: np.ndarray) -> str:
 
 
 def _build_judge_messages_kimi(gt_class: str, first_vlm_decision: dict) -> tuple[str, str]:
-    status = first_vlm_decision["status"]
-    final_class = first_vlm_decision["final_class"]
+    status = first_vlm_decision.get("status", "UNKNOWN")
+    final_class = first_vlm_decision.get("final_class", "unknown")
     reason = first_vlm_decision.get("reason", "")
 
     system_prompt = (
-        "You are a strict visual-classification evaluator. "
-        "Look at the image and decide whether the model's class label matches the "
-        "ground-truth class. Respond with ONLY a JSON object, no reasoning, no markdown."
+        "You are a strict text-based classification evaluator. "
+        "Decide whether a predicted class label matches a ground-truth class label. "
+        "Respond with ONLY a JSON object, no reasoning, no markdown."
     )
 
     user_prompt = (
         f"Ground-truth class: '{gt_class}'.\n"
         f"Model classification: '{final_class}' (status={status}).\n"
         f"Model reasoning: {reason}\n\n"
+        "Does the model's class label match the ground-truth class? "
+        "Be lenient with synonyms and descriptors (e.g., 'blue crab' matches 'crab').\n"
         'Answer with ONLY this exact JSON format: '
         '{"correct": true or false, "class_match": true or false, "explanation": "one sentence"}'
     )
@@ -319,7 +328,6 @@ def _call_kimi_judge(
     user_agent: str,
     system_prompt: str,
     user_prompt: str,
-    base64_image: str,
 ) -> dict:
     url = f"{base_url.rstrip('/')}/v1/chat/completions"
     headers = {
@@ -331,16 +339,7 @@ def _call_kimi_judge(
         "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                    },
-                ],
-            },
+            {"role": "user", "content": user_prompt},
         ],
         "max_tokens": 2048,
     }
@@ -384,7 +383,6 @@ def _create_judge(args: argparse.Namespace):
 
         def judge_fn(crop_bgr, gt_class: str, track: dict) -> dict:
             system_prompt, user_prompt = _build_judge_messages_kimi(gt_class, track)
-            base64_image = _encode_image_to_base64(crop_bgr)
             return _call_kimi_judge(
                 api_key=args.kimi_api_key,
                 base_url=args.kimi_api_base,
@@ -392,7 +390,6 @@ def _create_judge(args: argparse.Namespace):
                 user_agent=args.kimi_user_agent,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                base64_image=base64_image,
             )
 
         return judge_fn
@@ -406,6 +403,77 @@ def _normalize(label: str) -> str:
 
 def _is_known_class(label: str, known_classes: set) -> bool:
     return _normalize(label) in known_classes
+
+
+def _normalize_track_for_judge(track: dict, img_result: dict) -> dict:
+    """Normalize framework and detector_only tracks into a common schema."""
+    normalized = dict(track)
+
+    if "predicted_is_non_coco" in track:
+        # detector_only schema
+        normalized["status"] = "OUTLIER" if track.get("predicted_is_non_coco") else "KNOWN"
+        normalized["final_class"] = track.get("yolo_display_class") or track.get("yolo_class") or "unknown"
+        normalized["reason"] = ""
+        normalized["yolo_class"] = track.get("yolo_class", "unknown")
+        normalized["yolo_conf"] = track.get("yolo_conf", 0.0)
+    else:
+        # framework schema
+        normalized["status"] = track.get("status", "UNKNOWN")
+        normalized["final_class"] = track.get("final_class", "unknown")
+        normalized["reason"] = track.get("reason", "")
+        normalized["yolo_class"] = track.get("yolo_class", "unknown")
+        normalized["yolo_conf"] = track.get("yolo_conf", 0.0)
+
+    # Ensure a crop path exists. If the benchmark didn't save crops, try to
+    # generate one on the fly from the bbox and original image.
+    if not normalized.get("crop_path") or not Path(normalized["crop_path"]).exists():
+        bbox = track.get("bbox")
+        image_path = img_result.get("image")
+        if bbox and image_path and Path(image_path).exists():
+            try:
+                frame = cv2.imread(str(image_path))
+                if frame is not None:
+                    x1, y1, x2, y2 = [int(v) for v in bbox]
+                    h, w = frame.shape[:2]
+                    x1, y1 = max(0, min(x1, w)), max(0, min(y1, h))
+                    x2, y2 = max(0, min(x2, w)), max(0, min(y2, h))
+                    if x2 > x1 and y2 > y1:
+                        crop = frame[y1:y2, x1:x2]
+                        out_dir = Path(image_path).parent.parent / "judge_crops"
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        crop_path = out_dir / f"{Path(image_path).stem}_{track.get('track_id', 'unknown')}.jpg"
+                        cv2.imwrite(str(crop_path), crop)
+                        normalized["crop_path"] = str(crop_path)
+            except Exception:
+                pass
+
+    return normalized
+
+
+async def _judge_one(
+    crop,
+    gt_class: str,
+    norm_track: dict,
+    judge_fn: Callable,
+    semaphore: asyncio.Semaphore,
+) -> dict:
+    """Run a single LLM judge call under a concurrency semaphore."""
+    async with semaphore:
+        return await asyncio.to_thread(judge_fn, crop, gt_class, norm_track)
+
+
+async def _run_judgements(
+    judge_items: list[tuple],
+    judge_fn: Callable,
+    concurrency: int,
+) -> list:
+    """Run all judge calls concurrently with bounded concurrency."""
+    semaphore = asyncio.Semaphore(concurrency)
+    tasks = [
+        _judge_one(crop, gt_class, norm_track, judge_fn, semaphore)
+        for (_, crop, gt_class, norm_track) in judge_items
+    ]
+    return await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def main() -> None:
@@ -427,6 +495,7 @@ def main() -> None:
     judge_fn = _create_judge(args)
 
     judgements = []
+    judge_items = []  # (entry, crop, gt_class, norm_track) for concurrent LLM judging
     total = 0
 
     # Deterministic class-match counts
@@ -447,18 +516,20 @@ def main() -> None:
         gt_is_known = _is_known_class(gt_class, known_classes)
 
         for track in img_result.get("tracks", []):
-            crop_path = track.get("crop_path")
+            norm_track = _normalize_track_for_judge(track, img_result)
+
+            crop_path = norm_track.get("crop_path")
             if not crop_path or not Path(crop_path).exists():
-                print(f"[JUDGE] skipping track {track['track_id']} (no crop saved)")
+                print(f"[JUDGE] skipping track {track.get('track_id', 'unknown')} (no crop saved)")
                 continue
 
             crop = cv2.imread(str(crop_path))
             if crop is None:
-                print(f"[JUDGE] skipping track {track['track_id']} (crop unreadable)")
+                print(f"[JUDGE] skipping track {track.get('track_id', 'unknown')} (crop unreadable)")
                 continue
 
-            status = track.get("status", "UNKNOWN")
-            final_class = track.get("final_class", "unknown")
+            status = norm_track.get("status", "UNKNOWN")
+            final_class = norm_track.get("final_class", "unknown")
             first_is_known = status == "KNOWN"
 
             # Deterministic class-match metric
@@ -490,7 +561,7 @@ def main() -> None:
 
             entry = {
                 "image": img_result.get("relative"),
-                "track_id": track["track_id"],
+                "track_id": track.get("track_id", "unknown"),
                 "ground_truth_class": gt_class,
                 "ground_truth_is_known": gt_is_known,
                 "first_vlm_status": status,
@@ -503,42 +574,57 @@ def main() -> None:
                 "judge_explanation": None,
             }
 
-            if judge_fn is not None:
-                try:
-                    judgement = judge_fn(crop, gt_class, track)
-                except Exception as exc:
-                    print(f"[JUDGE] error on track {track['track_id']}: {exc}")
-                    traceback.print_exc()
-                    judgement = {"correct": False, "explanation": f"ERROR: {exc}"}
-
-                judge_total += 1
-                judge_correct = bool(judgement.get("correct", False))
-                judge_class_match = bool(judgement.get("class_match", judge_correct))
-                judge_explanation = judgement.get("explanation", "")
-
-                if judge_correct:
-                    judge_correct_count += 1
-                if judge_class_match == class_match:
-                    judge_agrees_with_class_match += 1
-                if judge_correct == decision_is_correct:
-                    judge_agrees_with_decision += 1
-
-                entry["judge_correct"] = judge_correct
-                entry["judge_class_match"] = judge_class_match
-                entry["judge_explanation"] = judge_explanation
-
             judgements.append(entry)
+            if judge_fn is not None:
+                judge_items.append((entry, crop, gt_class, norm_track))
 
-            print(
-                f"[JUDGE] {img_result.get('relative')} | "
-                f"gt={gt_class} | first={status}/{final_class} | "
-                f"class_match={class_match} | decision_correct={decision_is_correct}"
-                + (
-                    f" | judge_correct={entry['judge_correct']}"
-                    if entry["judge_correct"] is not None
-                    else ""
-                )
+    # Run LLM judge calls concurrently with bounded concurrency.
+    if judge_fn is not None and judge_items:
+        concurrency = args.judge_concurrency
+        if concurrency is None:
+            concurrency = 5 if args.judge_backend == "kimi" else 1
+        print(
+            f"[JUDGE] Running {len(judge_items)} LLM judge calls "
+            f"concurrently (max {concurrency} at a time)..."
+        )
+        judge_results = asyncio.run(_run_judgements(judge_items, judge_fn, concurrency))
+
+        for (entry, _, _, _), judgement in zip(judge_items, judge_results):
+            if isinstance(judgement, Exception):
+                print(f"[JUDGE] error on track {entry['track_id']}: {judgement}")
+                traceback.print_exc()
+                judgement = {"correct": False, "explanation": f"ERROR: {judgement}"}
+
+            judge_total += 1
+            judge_correct = bool(judgement.get("correct", False))
+            judge_class_match = bool(judgement.get("class_match", judge_correct))
+            judge_explanation = judgement.get("explanation", "")
+
+            if judge_correct:
+                judge_correct_count += 1
+            if judge_class_match == entry["class_match"]:
+                judge_agrees_with_class_match += 1
+            if judge_correct == entry["decision_correct"]:
+                judge_agrees_with_decision += 1
+
+            entry["judge_correct"] = judge_correct
+            entry["judge_class_match"] = judge_class_match
+            entry["judge_explanation"] = judge_explanation
+
+    # Print all judgement results.
+    for entry in judgements:
+        print(
+            f"[JUDGE] {entry['image']} | "
+            f"gt={entry['ground_truth_class']} | "
+            f"first={entry['first_vlm_status']}/{entry['first_vlm_class']} | "
+            f"class_match={entry['class_match']} | "
+            f"decision_correct={entry['decision_correct']}"
+            + (
+                f" | judge_correct={entry['judge_correct']}"
+                if entry["judge_correct"] is not None
+                else ""
             )
+        )
 
     # Deterministic metrics
     class_match_accuracy = class_match_count / total if total else 0.0

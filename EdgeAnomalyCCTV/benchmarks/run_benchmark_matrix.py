@@ -125,6 +125,12 @@ def parse_args() -> argparse.Namespace:
         help="Backend for the optional VLM judge (default: none)",
     )
     parser.add_argument(
+        "--judge-concurrency",
+        type=int,
+        default=None,
+        help="Max concurrent LLM judge calls. Default: 5 for kimi, 1 for local.",
+    )
+    parser.add_argument(
         "--judge-model",
         type=str,
         default="Qwen/Qwen3-VL-2B-Instruct",
@@ -150,6 +156,12 @@ def parse_args() -> argparse.Namespace:
         "--skip-judge",
         action="store_true",
         help="Skip the VLM judgement step for framework variants",
+    )
+    parser.add_argument(
+        "--top-k-per-image",
+        type=int,
+        default=1,
+        help="Keep only the top-K highest-confidence detections per image (0 = keep all, default: 1)",
     )
     return parser.parse_args()
 
@@ -237,9 +249,6 @@ def _build_variant_record(variant: str, run_summary: dict, judge_report: dict | 
             "recall": gt.get("recall"),
             "f1_score": gt.get("f1_score"),
         })
-        if judge_report is not None:
-            record["judge_report_path"] = judge_report.get("judge_report_path")
-            record["judge_backend"] = judge_report.get("judge_backend")
     else:
         record.update({
             "images_with_non_coco_detections": run_summary.get("images_with_non_coco_detections"),
@@ -247,6 +256,10 @@ def _build_variant_record(variant: str, run_summary: dict, judge_report: dict | 
             "image_level_non_coco_rate": run_summary.get("image_level_non_coco_rate"),
             "detection_level_non_coco_rate": run_summary.get("detection_level_non_coco_rate"),
         })
+
+    if judge_report is not None:
+        record["judge_report_path"] = judge_report.get("judge_report_path")
+        record["judge_backend"] = judge_report.get("judge_backend")
 
     return record
 
@@ -284,8 +297,8 @@ def main() -> None:
             ]
             if args.save_visualizations:
                 run_cmd.append("--save-visualizations")
-            if config["evaluation_mode"] == "framework":
-                run_cmd.append("--save-crops")
+            run_cmd.append("--save-crops")
+            run_cmd.extend(["--top-k-per-image", str(args.top_k_per_image)])
 
             _run_step(f"Run variant: {variant}", run_cmd)
 
@@ -299,8 +312,7 @@ def main() -> None:
 
         judge_report = None
         if (
-            config["evaluation_mode"] == "framework"
-            and not args.skip_judge
+            not args.skip_judge
             and args.judge_backend != "none"
         ):
             judge_cmd = [
@@ -311,6 +323,8 @@ def main() -> None:
                 "--judge-backend",
                 args.judge_backend,
             ]
+            if args.judge_concurrency is not None:
+                judge_cmd.extend(["--judge-concurrency", str(args.judge_concurrency)])
             if args.judge_backend == "local":
                 judge_cmd.extend(["--judge-model", args.judge_model])
                 if args.device:

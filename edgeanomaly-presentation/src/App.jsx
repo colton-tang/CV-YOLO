@@ -1,0 +1,683 @@
+import { useEffect, useRef, useState } from 'react'
+import {
+  AlertTriangle,
+  ArrowRight,
+  Camera,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Cpu,
+  Download,
+  Eye,
+  FileImage,
+  GitBranch,
+  Layers3,
+  ListTree,
+  MonitorPlay,
+  Radar,
+  ShieldCheck,
+  SquareDashedMousePointer,
+} from 'lucide-react'
+
+const STATUS_STYLES = {
+  RESOLVED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  VERIFYING: 'bg-amber-50 text-amber-700 border-amber-200',
+  OUTLIER: 'bg-rose-50 text-rose-700 border-rose-200',
+  UNKNOWN: 'bg-sky-50 text-sky-700 border-sky-200',
+}
+
+const slides = [
+  {
+    id: 'cover',
+    type: 'cover',
+    kicker: 'OOD Detection Framework Walkthrough',
+    title: 'EdgeAnomalyCCTV',
+    subtitle: 'An edge pipeline that fast-paths known objects and escalates OOD candidates for deeper verification.',
+    valueHook:
+      'The key design is selective OOD handling: high-confidence inliers pass immediately, while uncertain or unknown objects are isolated, reviewed, and labeled through an asynchronous vision-language path.',
+    author: {
+      project: 'Derived from EdgeAnomalyCCTV/src/main.py',
+      focus: 'Framework structure, OOD handling, and runtime flow',
+    },
+  },
+  {
+    id: 'architecture',
+    type: 'architecture',
+    header: '01. Five-Layer Architecture',
+    tagline: 'System Map',
+    layers: [
+      {
+        title: 'Layer 1',
+        label: 'Ingestion',
+        name: 'IngestionLayer',
+        icon: <Camera size={22} />,
+        points: ['Normalizes image, file, URL, or camera input', 'Delivers unified frame data for downstream OOD decisions'],
+      },
+      {
+        title: 'Layer 2',
+        label: 'Detection and Tracking',
+        name: 'DetectionTrackingLayer',
+        icon: <Radar size={22} />,
+        points: ['Runs YOLO detection and BotSort tracking', 'Produces class, confidence, bbox, and track history used to spot OOD candidates'],
+      },
+      {
+        title: 'Layer 3',
+        label: 'OOD Gate Filter',
+        name: 'GateOutlierFilterLayer',
+        icon: <GitBranch size={22} />,
+        points: ['Separates inliers from uncertain or unknown objects', 'Stores per-track OOD state in track_state_db'],
+      },
+      {
+        title: 'Layer 4',
+        label: 'OOD Verifier',
+        name: 'LLMClassifierLayer',
+        icon: <Cpu size={22} />,
+        points: ['Consumes llm_queue asynchronously', 'Uses Qwen3-VL-2B-Instruct to confirm known vs OOD crops'],
+      },
+      {
+        title: 'Layer 5',
+        label: 'Render and Alert',
+        name: 'RenderAlertLayer',
+        icon: <MonitorPlay size={22} />,
+        points: ['Renders operator-visible OOD outcomes', 'Prints summaries and status-aware annotations for alerts'],
+      },
+    ],
+  },
+  {
+    id: 'orchestration',
+    type: 'orchestration',
+    header: '02. main.py Orchestration',
+    tagline: 'Runtime Control',
+    stages: [
+      'Parse --mode and --input, or fall back to interactive mode selection.',
+      'Resolve the default input: benchmark image for graph mode, camera 0 for video mode.',
+      'Instantiate all five layers and start classifier.run() as a background asyncio task.',
+      'Branch into single-frame graph execution or continuous video loop while preserving the OOD review path.',
+    ],
+    branches: [
+      {
+        title: 'Graph mode OOD path',
+        icon: <FileImage size={20} />,
+        items: ['Single call to ingestion.get_frame()', 'Wait for llm_queue.join() so every OOD candidate is resolved', 'Render final annotated still image once'],
+      },
+      {
+        title: 'Video mode OOD path',
+        icon: <MonitorPlay size={20} />,
+        items: ['OpenCV capture with camera/file/URL support', 'Per-frame detect -> OOD gate -> render loop with async review in parallel', "Exit on 'q' or closed render window"],
+      },
+    ],
+  },
+  {
+    id: 'gates',
+    type: 'gates',
+    header: '03. OOD Decision Flow',
+    tagline: 'State Machine',
+    statuses: ['RESOLVED', 'VERIFYING', 'OUTLIER', 'UNKNOWN'],
+    gates: [
+      {
+        title: 'Gate 1: Finalized?',
+        body: 'If a track is already RESOLVED, OUTLIER, or UNKNOWN, it is dropped immediately so OOD work is not repeated.',
+      },
+      {
+        title: 'Gate 2: Fast-path known object',
+        body: 'If confidence exceeds HIGH_CONFIDENCE_THRESHOLD and the class is known, the object is treated as in-distribution and auto-passes to RESOLVED.',
+      },
+      {
+        title: 'Gate 3: OOD candidate',
+        body: 'Tracks in the uncertainty band or outside known_classes are treated as potential OOD objects, enter VERIFYING, and are queued for vision-language review once.',
+      },
+      {
+        title: 'Below low threshold',
+        body: 'Detections below LOW_CONFIDENCE_THRESHOLD are ignored so the OOD path is reserved for meaningful candidates rather than noise.',
+      },
+    ],
+  },
+  {
+    id: 'async',
+    type: 'async',
+    header: '04. Async OOD Review',
+    tagline: 'Queue Boundary',
+    flow: [
+      { name: 'YOLO output', detail: 'bbox, class, conf, raw_frame' },
+      { name: 'GateOutlierFilterLayer', detail: 'crop bbox and enqueue only OOD candidates' },
+      { name: 'llm_queue', detail: 'async queue buffers uncertain or unknown tracks' },
+      { name: 'LLMClassifierLayer.run()', detail: 'daemon-thread inference decides known vs outlier via run_in_executor' },
+      { name: 'track_state_db update', detail: 'status, class, reason, bbox, confidence for operator review' },
+    ],
+    callouts: [
+      'This is the key OOD design choice: expensive verification is selective, not applied to every detection.',
+      'If the VLM fails to load, the pipeline returns a fallback OUTLIER result instead of hanging.',
+    ],
+  },
+  {
+    id: 'outputs',
+    type: 'outputs',
+    header: '05. Output and Shutdown',
+    tagline: 'Operator Experience',
+    columns: [
+      {
+        title: 'OOD outcome rendering',
+        icon: <Eye size={22} />,
+        items: [
+          'VIDEO: live OpenCV window with status-colored boxes for known and OOD objects',
+          "IMAGE: writes EdgeAnomalyCCTV/output.jpg and prints JSON state for every reviewed candidate",
+          'Labels combine class, status, and confidence in one operator-facing string',
+        ],
+      },
+      {
+        title: 'Shutdown path',
+        icon: <Clock3 size={22} />,
+        items: [
+          'Release capture and destroy OpenCV windows',
+          'Cancel the LLM background task with timeout protection',
+          'Free processor/model memory and clear CUDA or MPS cache',
+        ],
+      },
+    ],
+    closing:
+      'The framework handles OOD by separating fast inlier acceptance from selective anomaly verification, so the runtime stays responsive while still escalating suspicious objects for deeper review.',
+  },
+]
+
+function App() {
+  const [currentSlide, setCurrentSlide] = useState(0)
+  const [isExporting, setIsExporting] = useState(false)
+  const exportSlideRefs = useRef([])
+
+  const next = () => setCurrentSlide((prev) => (prev === slides.length - 1 ? prev : prev + 1))
+  const prev = () => setCurrentSlide((prev) => (prev === 0 ? prev : prev - 1))
+
+  const setExportSlideRef = (index) => (node) => {
+    exportSlideRefs.current[index] = node
+  }
+
+  const getSearchableTextItems = (slideElement) => {
+    const slideRect = slideElement.getBoundingClientRect()
+    const walker = document.createTreeWalker(slideElement, NodeFilter.SHOW_TEXT)
+    const textItems = []
+
+    while (walker.nextNode()) {
+      const textNode = walker.currentNode
+      const text = textNode.textContent || ''
+      const parent = textNode.parentElement
+
+      if (!parent || !text.trim()) continue
+
+      const style = window.getComputedStyle(parent)
+      if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) {
+        continue
+      }
+
+      const matches = text.matchAll(/\S+/g)
+      for (const match of matches) {
+        const word = match[0]
+        const start = match.index
+        const end = start + word.length
+        const range = document.createRange()
+        range.setStart(textNode, start)
+        range.setEnd(textNode, end)
+
+        const rect = Array.from(range.getClientRects()).find((item) => item.width > 0 && item.height > 0)
+        range.detach()
+
+        if (!rect) continue
+
+        textItems.push({
+          text: word,
+          x: rect.left - slideRect.left,
+          y: rect.top - slideRect.top,
+          width: rect.width,
+          height: rect.height,
+        })
+      }
+    }
+
+    return textItems
+  }
+
+  const exportSlidesToPdf = async () => {
+    if (isExporting || !exportSlideRefs.current.length) return
+    setIsExporting(true)
+
+    try {
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
+      const exportWidth = 1600
+      const exportHeight = 900
+      const pageImages = []
+
+      if (document.fonts?.ready) {
+        await document.fonts.ready
+      }
+
+      for (let slideIndex = 0; slideIndex < exportSlideRefs.current.length; slideIndex += 1) {
+        const slideElement = exportSlideRefs.current[slideIndex]
+        if (!slideElement) continue
+
+        const searchableTextItems = getSearchableTextItems(slideElement)
+        const canvas = await html2canvas(slideElement, {
+          backgroundColor: '#f8fafc',
+          scale: 2,
+          useCORS: true,
+          scrollX: 0,
+          scrollY: 0,
+          width: exportWidth,
+          height: exportHeight,
+          windowWidth: exportWidth,
+          windowHeight: exportHeight,
+        })
+
+        pageImages.push({
+          dataUrl: canvas.toDataURL('image/jpeg', 0.95),
+          searchableTextItems,
+        })
+      }
+
+      if (!pageImages.length) return
+
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'pt',
+        format: [1600, 900],
+        compress: true,
+      })
+
+      pageImages.forEach((page, index) => {
+        if (index > 0) {
+          pdf.addPage([1600, 900], 'landscape')
+        }
+
+        pdf.setFont('helvetica', 'normal')
+        pdf.setTextColor(0, 0, 0)
+
+        page.searchableTextItems.forEach((item) => {
+          const fontSize = Math.max(4, item.height * 0.92)
+          const characterCount = Array.from(item.text).length
+          pdf.setFontSize(fontSize)
+          const pdfTextWidth = pdf.getTextWidth(item.text)
+          const charSpace = characterCount > 1 ? (item.width - pdfTextWidth) / (characterCount - 1) : 0
+          pdf.text(item.text, item.x, item.y, { baseline: 'top', charSpace })
+        })
+
+        pdf.addImage(page.dataUrl, 'JPEG', 0, 0, 1600, 900, undefined, 'SLOW')
+      })
+
+      pdf.save('edgeanomalycctv-framework.pdf')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'ArrowRight' || event.key === ' ') next()
+      if (event.key === 'ArrowLeft') prev()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  const slide = slides[currentSlide]
+
+  return (
+    <div className="deck-shell text-slate-900">
+      <div className="mx-auto flex min-h-screen max-w-[1800px] flex-col px-4 py-6 md:px-8">
+        <header className="mb-5 flex items-center justify-between gap-4 rounded-[22px] border border-slate-200/70 bg-[rgba(255,252,246,0.88)] px-5 py-4 shadow-panel backdrop-blur">
+          <div>
+            <p className="section-label">Technical Deck</p>
+            <h1 className="mt-1 text-lg font-semibold text-slate-900">EdgeAnomalyCCTV OOD Framework</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={exportSlidesToPdf}
+              disabled={isExporting}
+              className="inline-flex items-center gap-2 rounded-[14px] border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-70"
+            >
+              <Download size={16} />
+              {isExporting ? 'Exporting...' : 'Export PDF'}
+            </button>
+            <div className="rounded-[14px] border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600">
+              {currentSlide + 1} / {slides.length}
+            </div>
+          </div>
+        </header>
+
+        <main className="flex flex-1 flex-col justify-center">
+          <SlideView slide={slide} slideIndex={currentSlide} />
+        </main>
+
+        <footer className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-500">
+            Use <span className="font-semibold text-slate-700">ArrowLeft</span>,{' '}
+            <span className="font-semibold text-slate-700">ArrowRight</span>, or space to navigate.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={prev}
+              disabled={currentSlide === 0}
+              className="inline-flex items-center gap-2 rounded-[14px] border border-slate-300 bg-[rgba(255,252,246,0.9)] px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ChevronLeft size={16} />
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={next}
+              disabled={currentSlide === slides.length - 1}
+              className="inline-flex items-center gap-2 rounded-[14px] bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </footer>
+      </div>
+
+      <div className="pointer-events-none fixed -left-[99999px] top-0">
+        {slides.map((item, index) => (
+          <SlideView
+            key={item.id}
+            slide={item}
+            slideIndex={index}
+            mode="export"
+            slideRef={setExportSlideRef(index)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SlideView({ slide, slideIndex, mode = 'screen', slideRef }) {
+  const isExportMode = mode === 'export'
+  const shellClass = isExportMode
+    ? 'slide-panel diagram-grid flex h-[900px] w-[1600px] flex-col overflow-hidden rounded-none p-16'
+    : 'slide-panel diagram-grid mx-auto aspect-[16/9] w-full max-w-7xl rounded-[28px] p-6 shadow-panel backdrop-blur md:p-10'
+
+  return (
+    <section ref={slideRef} className={shellClass}>
+      {slide.type === 'cover' ? (
+        <CoverSlide slide={slide} />
+      ) : (
+        <StandardSlide slide={slide} slideIndex={slideIndex} isExportMode={isExportMode} />
+      )}
+    </section>
+  )
+}
+
+function CoverSlide({ slide }) {
+  return (
+    <div className="flex h-full flex-col justify-between">
+      <div className="grid gap-6 md:grid-cols-[1.38fr_0.62fr]">
+        <div className="max-w-5xl space-y-5">
+          <span className="section-label">{slide.kicker}</span>
+          <div className="space-y-4">
+            <h2 className="display-serif max-w-4xl text-[4.4rem] leading-[0.9] text-slate-900 md:text-[5rem]">
+              {slide.title}
+            </h2>
+            <p className="max-w-4xl text-[1.3rem] leading-relaxed text-slate-600 md:text-[1.55rem]">{slide.subtitle}</p>
+          </div>
+          <div className="deck-card max-w-4xl rounded-[22px] p-6">
+            <p className="section-label text-emerald-700">Core Thesis</p>
+            <p className="mt-3 text-[1.08rem] leading-relaxed text-slate-700 md:text-[1.28rem]">{slide.valueHook}</p>
+          </div>
+        </div>
+
+        <div className="deck-card-dark rounded-[24px] p-6 text-white">
+          <p className="section-label text-cyan-200">OOD Strategy</p>
+          <div className="mt-5 space-y-3 text-sm leading-relaxed text-slate-200">
+            <div className="subtle-rule pt-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Fast Path</p>
+              <p className="mt-2 text-base text-white">Known + high confidence {'->'} <span className="mono-note">RESOLVED</span></p>
+            </div>
+            <div className="subtle-rule pt-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Review Path</p>
+              <p className="mt-2 text-base text-white">Uncertain or unknown {'->'} <span className="mono-note">VERIFYING</span> {'->'} VLM decision</p>
+            </div>
+            <div className="subtle-rule pt-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Operational Goal</p>
+              <p className="mt-2 text-base text-white">Keep video throughput fast while escalating suspicious objects selectively.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-[1.25fr_0.75fr]">
+        <div className="deck-card-dark rounded-[22px] p-6 text-white">
+          <p className="section-label text-cyan-200">Pipeline Shape</p>
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-sm font-semibold">
+            {['Ingestion', 'Detection', 'OOD Gate', 'VLM Review', 'Render'].map((item, index) => (
+              <div key={item} className="flex items-center gap-3">
+                <span className="rounded-[12px] border border-white/10 bg-white/5 px-4 py-2">{item}</span>
+                {index < 4 && <ArrowRight size={16} className="text-cyan-200" />}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="deck-card rounded-[22px] p-6">
+          <p className="section-label text-slate-500">Presentation Focus</p>
+          <div className="mt-4 space-y-3 text-base text-slate-700">
+            <p>{slide.author.project}</p>
+            <p>{slide.author.focus}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StandardSlide({ slide, slideIndex, isExportMode }) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="mb-8 flex items-start justify-between gap-4">
+        <div className="max-w-4xl">
+          <p className="section-label mb-3">{slide.tagline}</p>
+          <h2 className={`${isExportMode ? 'text-[3.6rem]' : 'text-[2.65rem] md:text-[4rem]'} display-serif leading-[0.93] text-slate-900`}>
+            {slide.header}
+          </h2>
+        </div>
+        <div className="rounded-[18px] border border-slate-200 bg-[rgba(255,252,246,0.85)] px-5 py-3 text-4xl font-black text-slate-200">
+          0{slideIndex + 1}
+        </div>
+      </div>
+
+      <div className="flex-1">
+        {slide.type === 'architecture' && <ArchitectureSlide slide={slide} />}
+        {slide.type === 'orchestration' && <OrchestrationSlide slide={slide} />}
+        {slide.type === 'gates' && <GatesSlide slide={slide} />}
+        {slide.type === 'async' && <AsyncSlide slide={slide} />}
+        {slide.type === 'outputs' && <OutputsSlide slide={slide} />}
+      </div>
+    </div>
+  )
+}
+
+function ArchitectureSlide({ slide }) {
+  return (
+    <div className="grid h-full gap-5 md:grid-cols-5">
+      {slide.layers.map((layer) => (
+        <div key={layer.name} className="deck-card flex flex-col rounded-[22px] p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <span className="rounded-[10px] bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+              {layer.title}
+            </span>
+            <div className="rounded-[12px] bg-cyan-50 p-3 text-cyan-700">{layer.icon}</div>
+          </div>
+          <div className="min-h-[5.9rem]">
+            <h3 className="text-[1.08rem] font-semibold leading-snug text-slate-900 md:text-[1.2rem]">
+              {layer.label}
+            </h3>
+            <p className="mono-note mt-2 break-words text-[0.76rem] leading-relaxed text-cyan-800 md:text-[0.8rem]">
+              {layer.name}
+            </p>
+          </div>
+          <div className="mt-4 space-y-3 text-sm leading-relaxed text-slate-600">
+            {layer.points.map((point) => (
+              <p key={point}>{point}</p>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function OrchestrationSlide({ slide }) {
+  return (
+    <div className="grid h-full gap-6 md:grid-cols-[1.15fr_0.85fr]">
+      <div className="deck-card rounded-[22px] p-6">
+        <div className="mb-5 flex items-center gap-3">
+          <Layers3 className="text-cyan-700" />
+          <h3 className="text-2xl font-semibold text-slate-900">Startup and control path</h3>
+        </div>
+        <div className="space-y-4">
+          {slide.stages.map((stage, index) => (
+            <div key={stage} className="flex gap-4 rounded-[18px] border border-slate-200/80 bg-slate-50/85 p-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-slate-900 text-sm font-bold text-white">
+                {index + 1}
+              </div>
+              <p className="text-base leading-relaxed text-slate-700">{stage}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-5">
+        {slide.branches.map((branch) => (
+          <div key={branch.title} className="deck-card-dark rounded-[22px] p-6 text-white">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="rounded-[12px] bg-white/10 p-3">{branch.icon}</div>
+              <h3 className="text-2xl font-semibold">{branch.title}</h3>
+            </div>
+            <div className="space-y-3 text-sm leading-relaxed text-slate-200">
+              {branch.items.map((item) => (
+                <p key={item}>{item}</p>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function GatesSlide({ slide }) {
+  return (
+    <div className="grid h-full gap-5 md:grid-cols-[0.9fr_1.1fr]">
+      <div className="deck-card rounded-[22px] p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <ShieldCheck className="text-cyan-700" />
+          <h3 className="text-2xl font-semibold text-slate-900">State outcomes</h3>
+        </div>
+        <div className="grid gap-3">
+          {slide.statuses.map((status) => (
+            <div key={status} className={`rounded-[16px] border px-4 py-3 text-base font-semibold ${STATUS_STYLES[status]}`}>
+              {status}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-3">
+        {slide.gates.map((gate) => (
+          <div key={gate.title} className="deck-card rounded-[20px] p-4">
+            <div className="mb-2 flex items-center gap-3">
+              <SquareDashedMousePointer className="text-amber-600" size={18} />
+              <h3 className="text-lg font-semibold text-slate-900 md:text-xl">{gate.title}</h3>
+            </div>
+            <p className="text-[0.98rem] leading-relaxed text-slate-600">{gate.body}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AsyncSlide({ slide }) {
+  return (
+    <div className="grid h-full gap-5 md:grid-cols-[1.15fr_0.85fr]">
+      <div className="deck-card rounded-[22px] p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <ListTree className="text-cyan-700" />
+          <h3 className="text-2xl font-semibold text-slate-900">Queue-backed inference flow</h3>
+        </div>
+        <div className="space-y-2">
+          {slide.flow.map((step, index) => (
+            <div key={step.name} className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-cyan-700 text-sm font-bold text-white">
+                {index + 1}
+              </div>
+              <div className="flex-1 rounded-[18px] border border-slate-200 bg-slate-50/85 px-4 py-3">
+                <div className="flex items-center justify-between gap-4">
+                  <h4 className="text-[0.95rem] font-semibold text-slate-900 md:text-[1.02rem]">{step.name}</h4>
+                  {index < slide.flow.length - 1 && <ArrowRight className="text-slate-300" size={20} />}
+                </div>
+                <p className="mt-1 text-[0.92rem] leading-relaxed text-slate-600">{step.detail}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="deck-card rounded-[22px] border-cyan-200 bg-cyan-50/80 p-5">
+          <div className="mb-3 flex items-center gap-3 text-cyan-700">
+            <Cpu size={22} />
+            <h3 className="text-xl font-semibold">Why async matters</h3>
+          </div>
+          <p className="text-base leading-relaxed text-cyan-900">
+            The expensive multimodal classifier sits behind <code className="mono-note rounded bg-white px-2 py-1">llm_queue</code>,
+            so real-time detection keeps moving while verification catches up safely.
+          </p>
+        </div>
+
+        {slide.callouts.map((callout) => (
+          <div key={callout} className="deck-card-dark rounded-[20px] p-4 text-sm leading-relaxed text-slate-100">
+            {callout}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function OutputsSlide({ slide }) {
+  return (
+    <div className="flex h-full flex-col justify-between gap-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        {slide.columns.map((column) => (
+          <div key={column.title} className="deck-card rounded-[22px] p-5">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="rounded-[12px] bg-emerald-50 p-3 text-emerald-700">{column.icon}</div>
+              <h3 className="text-2xl font-semibold text-slate-900">{column.title}</h3>
+            </div>
+            <div className="space-y-3 text-base leading-relaxed text-slate-600">
+              {column.items.map((item) => (
+                <p key={item}>{item}</p>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-[1fr_1fr_1fr]">
+        {Object.keys(STATUS_STYLES).map((status) => (
+          <div key={status} className={`rounded-[16px] border px-4 py-3 text-center text-sm font-semibold ${STATUS_STYLES[status]}`}>
+            {status}
+          </div>
+        ))}
+        <div className="deck-card-dark rounded-[22px] p-5 text-base leading-relaxed text-slate-100 md:col-span-3">
+          <div className="mb-2 flex items-center gap-3">
+            <AlertTriangle size={20} className="text-amber-300" />
+            <span className="section-label text-amber-200">Takeaway</span>
+          </div>
+          <p>{slide.closing}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default App

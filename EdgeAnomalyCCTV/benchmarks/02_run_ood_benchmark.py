@@ -82,6 +82,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Save cropped object images for later review or judging",
     )
+    parser.add_argument(
+        "--top-k-per-image",
+        type=int,
+        default=1,
+        help="Keep only the top-K highest-confidence detections per image (0 = keep all, default: 1)",
+    )
     return parser.parse_args()
 
 
@@ -108,6 +114,13 @@ def _crop_bbox(frame: np.ndarray, bbox: list) -> np.ndarray:
     if x2 <= x1 or y2 <= y1:
         return frame
     return frame[y1:y2, x1:x2]
+
+
+def _apply_top_k_per_image(tracks: list[dict], k: int) -> list[dict]:
+    """Keep only the top-K detections by confidence for a single image."""
+    if k <= 0 or len(tracks) <= k:
+        return tracks
+    return sorted(tracks, key=lambda t: t.get("conf", 0.0), reverse=True)[:k]
 
 
 async def run_benchmark(args: argparse.Namespace) -> dict:
@@ -155,6 +168,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                 continue
 
             tracks = detection.process(frame_data)
+            tracks = _apply_top_k_per_image(tracks, args.top_k_per_image)
 
             # Ground-truth class from the parent folder name.
             gt_class = img_path.parent.name.lower().strip()

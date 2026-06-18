@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Avenir Next', 'Franklin Gothic Book', 'Segoe UI', sans-serif;
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, serif;
+  --ink: #152033;
+  --muted: #5d6a7f;
+  --panel: rgba(255, 252, 246, 0.96);
+  --panel-strong: #fffdf8;
+  --line: rgba(34, 55, 86, 0.1);
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(27, 86, 148, 0.11), transparent 30%),
+    radial-gradient(circle at 78% 12%, rgba(14, 116, 144, 0.08), transparent 18%),
+    linear-gradient(180deg, #eef2f6 0%, #f7f4ee 46%, #eef3f8 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
