@@ -37,6 +37,13 @@ body {
   letter-spacing: 0.01em;
 }
 
+.export-screenshot-mode *,
+.export-screenshot-mode *::before,
+.export-screenshot-mode *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
 button,
 input,
 textarea,

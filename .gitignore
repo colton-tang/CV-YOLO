@@ -55,3 +55,5 @@ benchmark_data/ood_results*
 EdgeAnomalyCCTV/ood_results*
 Paper
 benchmark_data/
+tmp/
+edgeanomaly-presentation/output/

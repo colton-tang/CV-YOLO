@@ -208,56 +208,12 @@ function App() {
     exportSlideRefs.current[index] = node
   }
 
-  const getSearchableTextItems = (slideElement) => {
-    const slideRect = slideElement.getBoundingClientRect()
-    const walker = document.createTreeWalker(slideElement, NodeFilter.SHOW_TEXT)
-    const textItems = []
-
-    while (walker.nextNode()) {
-      const textNode = walker.currentNode
-      const text = textNode.textContent || ''
-      const parent = textNode.parentElement
-
-      if (!parent || !text.trim()) continue
-
-      const style = window.getComputedStyle(parent)
-      if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) {
-        continue
-      }
-
-      const matches = text.matchAll(/\S+/g)
-      for (const match of matches) {
-        const word = match[0]
-        const start = match.index
-        const end = start + word.length
-        const range = document.createRange()
-        range.setStart(textNode, start)
-        range.setEnd(textNode, end)
-
-        const rect = Array.from(range.getClientRects()).find((item) => item.width > 0 && item.height > 0)
-        range.detach()
-
-        if (!rect) continue
-
-        textItems.push({
-          text: word,
-          x: rect.left - slideRect.left,
-          y: rect.top - slideRect.top,
-          width: rect.width,
-          height: rect.height,
-        })
-      }
-    }
-
-    return textItems
-  }
-
   const exportSlidesToPdf = async () => {
     if (isExporting || !exportSlideRefs.current.length) return
     setIsExporting(true)
 
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
+      const [{ toJpeg }, { jsPDF }] = await Promise.all([import('html-to-image'), import('jspdf')])
       const exportWidth = 1600
       const exportHeight = 900
       const pageImages = []
@@ -270,22 +226,19 @@ function App() {
         const slideElement = exportSlideRefs.current[slideIndex]
         if (!slideElement) continue
 
-        const searchableTextItems = getSearchableTextItems(slideElement)
-        const canvas = await html2canvas(slideElement, {
+        const dataUrl = await toJpeg(slideElement, {
+          cacheBust: true,
+          pixelRatio: 1.5,
+          quality: 0.82,
           backgroundColor: '#f8fafc',
-          scale: 2,
-          useCORS: true,
-          scrollX: 0,
-          scrollY: 0,
           width: exportWidth,
           height: exportHeight,
-          windowWidth: exportWidth,
-          windowHeight: exportHeight,
+          canvasWidth: Math.round(exportWidth * 1.5),
+          canvasHeight: Math.round(exportHeight * 1.5),
         })
 
         pageImages.push({
-          dataUrl: canvas.toDataURL('image/jpeg', 0.95),
-          searchableTextItems,
+          dataUrl,
         })
       }
 
@@ -303,19 +256,7 @@ function App() {
           pdf.addPage([1600, 900], 'landscape')
         }
 
-        pdf.setFont('helvetica', 'normal')
-        pdf.setTextColor(0, 0, 0)
-
-        page.searchableTextItems.forEach((item) => {
-          const fontSize = Math.max(4, item.height * 0.92)
-          const characterCount = Array.from(item.text).length
-          pdf.setFontSize(fontSize)
-          const pdfTextWidth = pdf.getTextWidth(item.text)
-          const charSpace = characterCount > 1 ? (item.width - pdfTextWidth) / (characterCount - 1) : 0
-          pdf.text(item.text, item.x, item.y, { baseline: 'top', charSpace })
-        })
-
-        pdf.addImage(page.dataUrl, 'JPEG', 0, 0, 1600, 900, undefined, 'SLOW')
+        pdf.addImage(page.dataUrl, 'JPEG', 0, 0, 1600, 900, undefined, 'MEDIUM')
       })
 
       pdf.save('edgeanomalycctv-framework.pdf')
@@ -337,7 +278,7 @@ function App() {
   const slide = slides[currentSlide]
 
   return (
-    <div className="deck-shell text-slate-900">
+    <div className="deck-shell text-slate-900" data-total-slides={slides.length}>
       <div className="mx-auto flex min-h-screen max-w-[1800px] flex-col px-4 py-6 md:px-8">
         <header className="mb-5 flex items-center justify-between gap-4 rounded-[22px] border border-slate-200/70 bg-[rgba(255,252,246,0.88)] px-5 py-4 shadow-panel backdrop-blur">
           <div>
@@ -416,7 +357,7 @@ function SlideView({ slide, slideIndex, mode = 'screen', slideRef }) {
   return (
     <section ref={slideRef} className={shellClass}>
       {slide.type === 'cover' ? (
-        <CoverSlide slide={slide} />
+        <CoverSlide slide={slide} isExportMode={isExportMode} />
       ) : (
         <StandardSlide slide={slide} slideIndex={slideIndex} isExportMode={isExportMode} />
       )}
@@ -424,7 +365,7 @@ function SlideView({ slide, slideIndex, mode = 'screen', slideRef }) {
   )
 }
 
-function CoverSlide({ slide }) {
+function CoverSlide({ slide, isExportMode = false }) {
   return (
     <div className="grid h-full gap-8 lg:grid-cols-[1.15fr_0.85fr] items-center overflow-hidden py-2">
       {/* Left Column: Title & Presenter Info */}
@@ -432,14 +373,14 @@ function CoverSlide({ slide }) {
         <div>
           {/* Glowing Kicker */}
           <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200/50 bg-cyan-50/50 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-cyan-800">
-            <span className="flex h-2 w-2 rounded-full bg-cyan-500 animate-pulse" />
+            <span className={`flex h-2 w-2 rounded-full bg-cyan-500 ${isExportMode ? '' : 'animate-pulse'}`} />
             {slide.kicker}
           </div>
           
           {/* Display Title with Gradient */}
           <h1 className="display-serif mt-5 text-[3.8rem] leading-[0.95] tracking-tight text-slate-900 md:text-[4.5rem]">
             Edge Anomaly <br />
-            <span className="bg-gradient-to-r from-cyan-600 via-teal-600 to-amber-500 bg-clip-text text-transparent">
+            <span className={isExportMode ? 'text-cyan-700' : 'bg-gradient-to-r from-cyan-600 via-teal-600 to-amber-500 bg-clip-text text-transparent'}>
               Detection Framework
             </span>
           </h1>
@@ -464,6 +405,9 @@ function CoverSlide({ slide }) {
               <p className="text-xs text-slate-500 mt-0.5">
                 National University of Singapore • <span className="font-mono">Qinxing_tang@u.nus.edu</span>
               </p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                GitHub: <a href="https://github.com/colton-tang/CV-YOLO.git" target="_blank" rel="noopener noreferrer" className="font-mono text-cyan-700 hover:underline">https://github.com/colton-tang/CV-YOLO.git</a>
+              </p>
               <p className="text-[0.7rem] text-slate-400 mt-1 uppercase font-bold tracking-wider">
                 19th June 2026
               </p>
@@ -473,10 +417,14 @@ function CoverSlide({ slide }) {
       </div>
 
       {/* Right Column: Visual Pipeline Flow Graphic */}
-      <div className="deck-card relative rounded-[28px] p-6 text-slate-800 h-full flex flex-col justify-between overflow-hidden shadow-panel backdrop-blur">
+      <div
+        className={`deck-card relative rounded-[28px] p-6 text-slate-800 h-full flex flex-col justify-between overflow-hidden ${
+          isExportMode ? '' : 'shadow-panel backdrop-blur'
+        }`}
+      >
         {/* Subtle glowing radial background graphics */}
-        <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-cyan-500/5 blur-[80px] pointer-events-none" />
-        <div className="absolute -left-20 -bottom-20 h-64 w-64 rounded-full bg-amber-500/5 blur-[80px] pointer-events-none" />
+        {!isExportMode && <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-cyan-500/5 blur-[80px] pointer-events-none" />}
+        {!isExportMode && <div className="absolute -left-20 -bottom-20 h-64 w-64 rounded-full bg-amber-500/5 blur-[80px] pointer-events-none" />}
 
         <div className="relative">
           <p className="section-label text-cyan-700">5-Layer Pipeline Flow</p>

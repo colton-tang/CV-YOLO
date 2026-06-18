@@ -27,6 +27,34 @@ Model weights are downloaded automatically on first use.
 
 ---
 
+## Presentation PDF Export
+
+The presentation deck in `edgeanomaly-presentation/` supports a screenshot-based
+PDF export that matches the on-screen slides more closely than the browser-only
+export button.
+
+```bash
+cd edgeanomaly-presentation
+npm install
+npx playwright install chromium
+npm run export:pdf
+```
+
+This command:
+
+- builds the latest presentation
+- opens the deck in a headless browser
+- captures each slide as a screenshot
+- assembles those screenshots into a PDF
+
+The generated file is written to:
+
+```bash
+edgeanomaly-presentation/output/pdf/edgeanomalycctv-framework.pdf
+```
+
+---
+
 ## Benchmarking
 
 The benchmarking suite is the fastest way to evaluate how well the pipeline
