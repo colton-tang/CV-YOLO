@@ -12,8 +12,8 @@ Usage:
     # Download up to 20 images per OOD class from OpenImages V7
     python 01_prepare_openimages_ood.py --backend openimages --max-per-class 20
 
-    # Use the tiny fallback URL set (no extra dependencies)
-    python 01_prepare_openimages_ood.py --backend fallback
+    # Use a torchvision dataset as a quick OOD source
+    python 01_prepare_openimages_ood.py --backend torchvision --max-per-class 3
 
     # Use your own local image folder (just validate it)
     python 01_prepare_openimages_ood.py --backend local --local-dir ./my_ood_images
@@ -44,6 +44,7 @@ from constants import COCO_CLASSES  # noqa: E402
 
 _ood_classes = importlib.import_module("00_ood_classes")
 OOD_CLASSES = _ood_classes.OOD_CLASSES
+OPENIMAGES_OOD_CLASSES = getattr(_ood_classes, "OPENIMAGES_OOD_CLASSES", OOD_CLASSES)
 
 DEFAULT_OUTPUT_DIR = ROOT / "benchmark_data" / "ood_openimages"
 
@@ -70,7 +71,7 @@ def parse_args() -> argparse.Namespace:
         "--classes",
         type=str,
         default=None,
-        help="Comma-separated list of OOD classes to download (default: curated OOD_CLASSES)",
+        help="Comma-separated list of OOD classes to download (default: OPENIMAGES_OOD_CLASSES)",
     )
     parser.add_argument(
         "--output-dir",
@@ -182,7 +183,6 @@ def _download_torchvision(classes, explicit_classes, dataset_name: str, output_d
 
         try:
             # PIL Image -> BGR numpy array.
-            import numpy as np
             rgb = np.array(img)
             bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
             if _save_image(bgr, dest):
@@ -199,6 +199,47 @@ def _download_torchvision(classes, explicit_classes, dataset_name: str, output_d
     return manifest
 
 
+def _validate_openimages_classes(requested_classes: list[str]) -> tuple[list[str], list[str]]:
+    """
+    Map requested class names to official OpenImages V7 class names.
+
+    Returns:
+        official_classes: valid OpenImages class names in official casing
+        match_keys: lowercase keys used to match detections after download
+
+    Prints warnings for invalid names and exits if none are valid.
+    """
+    import fiftyone.utils.openimages as fouo
+
+    official = fouo.get_classes(version="v7")
+    official_lower = {c.lower(): c for c in official}
+
+    official_classes = []
+    match_keys = []
+    invalid = []
+
+    for c in requested_classes:
+        key = c.lower().strip()
+        if key in official_lower:
+            official_classes.append(official_lower[key])
+            match_keys.append(key)
+        else:
+            invalid.append(c)
+
+    if invalid:
+        print("\nWARNING: the following classes are not valid OpenImages V7 boxable classes:")
+        for c in invalid:
+            print(f"  - {c}")
+        print("Run `python -c \"import fiftyone.utils.openimages as fouo; print(fouo.get_classes())\"`")
+        print("to see the full list of valid class names.\n")
+
+    if not official_classes:
+        print("ERROR: no valid OpenImages classes requested. Exiting.")
+        sys.exit(1)
+
+    return official_classes, match_keys
+
+
 def _download_openimages(classes, max_per_class: int, output_dir: Path) -> dict:
     """Download a subset of OpenImages V7 for the requested OOD classes."""
     try:
@@ -211,16 +252,20 @@ def _download_openimages(classes, max_per_class: int, output_dir: Path) -> dict:
 
     manifest = {"backend": "openimages", "classes": {}, "images": []}
 
-    # Load OpenImages V7 validation split.  This is a once-off download that
-    # fiftyone will cache in ~/fiftyone.
+    # Validate and map to official OpenImages class names (Title Case).
+    oi_classes, match_keys = _validate_openimages_classes(classes)
+    match_key_set = set(match_keys)
+
+    print(f"[openimages] valid classes to download: {oi_classes}")
     print("[openimages] loading OpenImages V7 validation split via fiftyone ...")
+
     try:
         dataset = foz.load_zoo_dataset(
             "open-images-v7",
             split="validation",
             label_types=["detections"],
-            classes=classes,
-            max_samples=max_per_class * len(classes),
+            classes=oi_classes,
+            max_samples=max_per_class * len(oi_classes),
         )
     except Exception as exc:
         print(f"ERROR: failed to load OpenImages: {exc}")
@@ -233,7 +278,7 @@ def _download_openimages(classes, max_per_class: int, output_dir: Path) -> dict:
         matched_class = None
         for det in detections:
             label = det.label.lower().strip()
-            if label in classes:
+            if label in match_key_set:
                 matched_class = label
                 break
         if matched_class is None:
@@ -289,7 +334,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     explicit_classes = [c.strip().lower() for c in args.classes.split(",")] if args.classes else []
-    classes = explicit_classes if explicit_classes else OOD_CLASSES
+    classes = explicit_classes if explicit_classes else OPENIMAGES_OOD_CLASSES
     print(f"OOD classes for this benchmark: {classes}")
 
     if args.backend == "torchvision":

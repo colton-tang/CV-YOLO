@@ -19,9 +19,10 @@ from constants import COCO_CLASSES
 KNOWN_CLASSES = COCO_CLASSES
 KNOWN_SET = set(KNOWN_CLASSES)
 
-# A curated list of object classes that are NOT in COCO but are common enough
-# to appear in OpenImages / real-world images.  These are good candidates for
-# an OOD-class benchmark.
+
+# Curated OOD classes that are NOT in COCO.
+# These are used by the evaluation code (is_ood) and by the torchvision/local
+# backends.  They can be lowercase because is_ood() normalizes case.
 OOD_CLASSES = [
     "snake",
     "lizard",
@@ -65,10 +66,58 @@ OOD_CLASSES = [
     "manhole cover",
 ]
 
+
+# Subset of OOD_CLASSES that actually exists in OpenImages V7 boxable classes.
+# These names are stored in official Title Case so FiftyOne accepts them.
+# Non-existent classes (octopus, cactus, pine tree, drone, robot, smoke, mask,
+# microscope, telescope, volcano, tornado, waterfall, canyon, glacier, pyramid,
+# windmill, satellite dish, solar panel, traffic cone, manhole cover) were
+# replaced with semantically similar OOD classes that ARE in OpenImages V7.
+OPENIMAGES_OOD_CLASSES = [
+    "Snake",
+    "Lizard",
+    "Frog",
+    "Crab",
+    "Lobster",
+    "Shrimp",
+    "Squid",
+    "Jellyfish",
+    "Starfish",
+    "Seahorse",
+    "Mushroom",
+    "Tree",
+    "Flower",
+    "Houseplant",
+    "Plant",
+    "Helicopter",
+    "Handgun",
+    "Shotgun",
+    "Rifle",
+    "Bow and arrow",
+    "Piano",
+    "Guitar",
+    "Drum",
+    "Helmet",
+    "Fireplace",
+    "Scorpion",
+    "Axe",
+    "Dagger",
+    "Sword",
+    "Balloon",
+    "Parachute",
+    "Toy",
+]
+
+
 # Verify none of these accidentally overlap with COCO.
-OVERLAPS = [c for c in OOD_CLASSES if c in KNOWN_SET]
-if OVERLAPS:
-    raise ValueError(f"OOD_CLASSES overlap with COCO: {OVERLAPS}")
+_OVERLAPS = [c for c in OOD_CLASSES if c in KNOWN_SET]
+if _OVERLAPS:
+    raise ValueError(f"OOD_CLASSES overlap with COCO: {_OVERLAPS}")
+
+_OI_OVERLAPS = [c for c in OPENIMAGES_OOD_CLASSES if c.lower() in KNOWN_SET]
+if _OI_OVERLAPS:
+    raise ValueError(f"OPENIMAGES_OOD_CLASSES overlap with COCO: {_OI_OVERLAPS}")
+
 
 # A tiny fallback benchmark: a handful of public-domain/CC0 Wikimedia Commons
 # URLs that can be used immediately if OpenImages is not downloaded.  These are
