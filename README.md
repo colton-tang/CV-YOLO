@@ -6,10 +6,15 @@ anomaly detection in images and video:
 - **YOLO26n / YOLO-World local inference** (`src/inference.py`, `src/inference_world.py`)
 - **EdgeAnomalyCCTV** (`EdgeAnomalyCCTV/`) — a 5-layer edge pipeline with YOLOv8,
   gating filters, and a VLM outlier classifier.
-- **Paper cascade** (`Paper/cascade.py`) — a reproducible implementation of the
-  cascading multi-agent anomaly-detection framework from arXiv:2601.06204v3.
+- **Benchmarking suite** (`EdgeAnomalyCCTV/benchmarks/`) — comprehensive OOD-class
+  evaluation, matrix comparisons, and VLM-as-a-judge verification.
 - **Presentation** (`edgeanomaly-presentation/`) — a Vite + React frontend for
   demoing / visualizing results.
+
+> **Note:** The `Paper/` folder is detached from this repository (ignored by Git)
+> and kept locally for reference. It contains PDFs and a standalone reproducible
+> implementation of the cascading multi-agent anomaly-detection framework from
+> arXiv:2601.06204v3.
 
 ---
 
@@ -25,6 +30,194 @@ pip install -r requirements.txt
 ```
 
 Model weights are downloaded automatically on first use.
+
+---
+
+## Benchmarking
+
+The benchmarking suite is the fastest way to evaluate how well the pipeline
+detects **out-of-distribution (OOD)** objects — anything that is not in the
+COCO closed set.
+
+### Quick start: one-shot benchmark
+
+```bash
+# Full pipeline on the small Caltech101 benchmark, with Kimi judge
+python EdgeAnomalyCCTV/benchmarks/main.py --judge-backend kimi
+
+# Use a local judge model instead
+python EdgeAnomalyCCTV/benchmarks/main.py --judge-backend local \
+    --judge-model Qwen/Qwen3-VL-2B-Instruct
+
+# Skip preparation if the benchmark already exists
+python EdgeAnomalyCCTV/benchmarks/main.py \
+    --skip-prepare \
+    --judge-backend kimi
+```
+
+### Benchmark scripts
+
+| File | Purpose |
+|------|---------|
+| `00_ood_classes.py` | Curated list of OOD classes and helpers. |
+| `01_prepare_openimages_ood.py` | Download / prepare an OOD image benchmark. |
+| `02_run_ood_benchmark.py` | Run the full pipeline on the benchmark and report statistics. |
+| `03_judge_vlm_correctness.py` | Independently judge VLM decisions (deterministic or LLM-as-a-judge). |
+| `main.py` | One-shot orchestrator that runs all of the above. |
+| `run_benchmark_matrix.py` | Compare multiple detector/framework variants side-by-side. |
+
+### Detailed benchmark guide
+
+#### 1. Prepare a benchmark
+
+**Small / fast — Caltech101 via torchvision:**
+
+```bash
+python EdgeAnomalyCCTV/benchmarks/01_prepare_openimages_ood.py \
+    --backend torchvision \
+    --torchvision-dataset Caltech101 \
+    --max-per-class 3 \
+    --output-dir benchmark_data/ood_openimages_small \
+    --classes octopus,lobster,scorpion,helicopter,crab,starfish
+```
+
+**Larger / more realistic — OpenImages:**
+
+```bash
+pip install fiftyone
+
+python EdgeAnomalyCCTV/benchmarks/01_prepare_openimages_ood.py \
+    --backend openimages \
+    --max-per-class 20 \
+    --output-dir benchmark_data/ood_openimages
+```
+
+**Use your own images:**
+
+Organize your images in folders named by class:
+
+```text
+/path/to/your/ood_images/
+├── crab/
+├── helicopter/
+└── scorpion/
+```
+
+```bash
+python EdgeAnomalyCCTV/benchmarks/01_prepare_openimages_ood.py \
+    --backend local \
+    --local-dir /path/to/your/ood_images \
+    --output-dir benchmark_data/ood_local
+```
+
+#### 2. Run the benchmark
+
+```bash
+python EdgeAnomalyCCTV/benchmarks/02_run_ood_benchmark.py \
+    --benchmark-dir benchmark_data/ood_openimages_small \
+    --output-dir benchmark_data/ood_results_small
+```
+
+Results are saved to `benchmark_data/ood_results_small/ood_benchmark_summary.json`.
+
+#### 3. Judge VLM decisions (optional)
+
+```bash
+# Fast deterministic comparison (no model load)
+python EdgeAnomalyCCTV/benchmarks/03_judge_vlm_correctness.py \
+    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
+    --skip-llm-judge
+
+# Local judge model
+python EdgeAnomalyCCTV/benchmarks/03_judge_vlm_correctness.py \
+    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
+    --judge-backend local \
+    --judge-model Qwen/Qwen3-VL-2B-Instruct
+
+# Kimi API judge
+python EdgeAnomalyCCTV/benchmarks/03_judge_vlm_correctness.py \
+    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
+    --judge-backend kimi
+```
+
+### Benchmark matrix: compare variants
+
+`run_benchmark_matrix.py` runs the same benchmark across multiple
+ detector / framework combinations and produces a single combined summary:
+
+```bash
+python EdgeAnomalyCCTV/benchmarks/run_benchmark_matrix.py \
+    --judge-backend kimi
+```
+
+Available variants:
+
+| Variant | Model | Mode |
+|---------|-------|------|
+| `yolov8n_framework` | `yolov8n.pt` | Full EdgeAnomalyCCTV framework |
+| `yolo_world_only` | `yolov8m-world.pt` | Detector-only evaluation |
+| `yolo_world_framework` | `yolov8m-world.pt` | Full framework with YOLO-World |
+
+Customize the matrix:
+
+```bash
+# Run only selected variants
+python EdgeAnomalyCCTV/benchmarks/run_benchmark_matrix.py \
+    --variants yolov8n_framework,yolo_world_framework \
+    --judge-backend kimi
+
+# Larger OpenImages benchmark
+python EdgeAnomalyCCTV/benchmarks/run_benchmark_matrix.py \
+    --backend openimages \
+    --max-per-class 20 \
+    --benchmark-dir benchmark_data/ood_openimages \
+    --output-dir benchmark_data/benchmark_matrix_results \
+    --judge-backend kimi
+
+# Skip steps when re-running
+python EdgeAnomalyCCTV/benchmarks/run_benchmark_matrix.py \
+    --skip-prepare \
+    --skip-judge
+```
+
+The combined summary is written to
+`benchmark_data/benchmark_matrix_results/benchmark_matrix_summary.json`.
+
+### Interpreting results
+
+`02_run_ood_benchmark.py` prints a summary like this:
+
+```text
+Total images evaluated       : 18
+Images with detections       : 13
+Images flagged with outlier  : 13
+Total object detections      : 17
+Total objects flagged outlier: 17
+Object-level outlier recall  : 100.00%
+Image-level outlier recall   : 100.00%
+```
+
+- **Object-level outlier recall** — what fraction of detected objects were flagged as OUTLIER.
+- **Image-level outlier recall** — what fraction of images with detections had at least one OUTLIER.
+
+For a good OOD detector, both values should be high, because every detected OOD
+object should be classified as an outlier.
+
+Ground-truth metrics are also reported (folder labels treated as truth):
+
+```text
+Ground-truth metrics (folder labels):
+  Confusion matrix: TP=17 TN=0 FP=0 FN=0
+  Accuracy         : 100.00%
+  Precision        : 100.00%
+  Recall           : 100.00%
+  F1-score         : 100.00%
+```
+
+- **TP** — OOD object flagged as OUTLIER
+- **TN** — COCO object flagged as KNOWN
+- **FP** — COCO object wrongly flagged as OUTLIER
+- **FN** — OOD object wrongly flagged as KNOWN
 
 ---
 
@@ -129,125 +322,7 @@ python EdgeAnomalyCCTV/src/main.py --mode graph --input path/to/image.jpg
 python EdgeAnomalyCCTV/src/main.py --mode video --input path/to/video.mp4
 ```
 
-### OOD-Class Benchmark
-
-The framework treats `COCO_CLASSES` as the known closed set.  Anything else
-should ideally be flagged as an **OUTLIER** by the LLM classifier.
-
-Helper scripts live in `EdgeAnomalyCCTV/benchmarks/`:
-
-| File | Purpose |
-|------|---------|
-| `00_ood_classes.py` | Curated list of OOD classes and helpers. |
-| `01_prepare_openimages_ood.py` | Download / prepare an OOD image benchmark. |
-| `02_run_ood_benchmark.py` | Run the full pipeline on the benchmark and report statistics. |
-| `03_judge_vlm_correctness.py` | Independently judge VLM decisions (deterministic or LLM-as-a-judge). |
-| `main.py` | One-shot orchestrator that runs all of the above. |
-
-#### How to run it
-
-All benchmark scripts should be run from the project root with the virtual
-environment activated:
-
-```bash
-cd /Users/t/CV
-source venv/bin/activate
-```
-
-##### One-shot orchestrator
-
-`main.py` runs the whole evaluation in one command — prepare, run, and judge:
-
-```bash
-# Full pipeline on the small Caltech101 benchmark, with Kimi judge
-python EdgeAnomalyCCTV/benchmarks/main.py --judge-backend kimi
-```
-
-```bash
-# Use a local judge model instead
-python EdgeAnomalyCCTV/benchmarks/main.py --judge-backend local \
-    --judge-model Qwen/Qwen3-VL-2B-Instruct
-```
-
-```bash
-# Skip preparation if the benchmark already exists
-python EdgeAnomalyCCTV/benchmarks/main.py \
-    --skip-prepare \
-    --judge-backend kimi
-```
-
-```bash
-# Larger OpenImages benchmark (requires fiftyone)
-python EdgeAnomalyCCTV/benchmarks/main.py \
-    --backend openimages \
-    --max-per-class 20 \
-    --benchmark-dir benchmark_data/ood_openimages \
-    --output-dir benchmark_data/ood_results \
-    --judge-backend kimi
-```
-
-Use `--skip-prepare`, `--skip-run`, or `--skip-judge` to run only the steps
-you need.  The orchestrator loads credentials from `.env` automatically.
-
-##### Quick start (no extra installs)
-
-Uses **Caltech101** via `torchvision` and finishes in a few minutes.
-
-```bash
-# 1. Prepare a small 18-image benchmark (6 OOD classes, 3 images each)
-python EdgeAnomalyCCTV/benchmarks/01_prepare_openimages_ood.py \
-    --backend torchvision \
-    --torchvision-dataset Caltech101 \
-    --max-per-class 3 \
-    --output-dir benchmark_data/ood_openimages_small \
-    --classes octopus,lobster,scorpion,helicopter,crab,starfish
-
-# 2. Run the EdgeAnomalyCCTV pipeline on it
-python EdgeAnomalyCCTV/benchmarks/02_run_ood_benchmark.py \
-    --benchmark-dir benchmark_data/ood_openimages_small \
-    --output-dir benchmark_data/ood_results_small
-```
-
-Results are saved to `benchmark_data/ood_results_small/ood_benchmark_summary.json`.
-
-##### Larger / more realistic benchmark (OpenImages)
-
-```bash
-pip install fiftyone
-
-python EdgeAnomalyCCTV/benchmarks/01_prepare_openimages_ood.py \
-    --backend openimages \
-    --max-per-class 20 \
-    --output-dir benchmark_data/ood_openimages
-
-python EdgeAnomalyCCTV/benchmarks/02_run_ood_benchmark.py \
-    --benchmark-dir benchmark_data/ood_openimages \
-    --output-dir benchmark_data/ood_results
-```
-
-##### Use your own images
-
-Organize your images in folders named by class:
-
-```text
-/path/to/your/ood_images/
-├── crab/
-├── helicopter/
-└── scorpion/
-```
-
-```bash
-python EdgeAnomalyCCTV/benchmarks/01_prepare_openimages_ood.py \
-    --backend local \
-    --local-dir /path/to/your/ood_images \
-    --output-dir benchmark_data/ood_local
-
-python EdgeAnomalyCCTV/benchmarks/02_run_ood_benchmark.py \
-    --benchmark-dir benchmark_data/ood_local \
-    --output-dir benchmark_data/ood_results_local
-```
-
-##### Single-image sanity check
+### Single-image sanity check
 
 Run one OOD image through the main pipeline:
 
@@ -256,128 +331,16 @@ python EdgeAnomalyCCTV/src/main.py --mode graph \
     --input benchmark_data/ood_openimages_small/helicopter/helicopter_5528.jpg
 ```
 
-#### Interpreting results
-
-`02_run_ood_benchmark.py` prints a summary like this:
-
-```text
-Total images evaluated       : 18
-Images with detections       : 13
-Images flagged with outlier  : 13
-Total object detections      : 17
-Total objects flagged outlier: 17
-Object-level outlier recall  : 100.00%
-Image-level outlier recall   : 100.00%
-```
-
-- **Object-level outlier recall** — what fraction of detected objects were flagged as OUTLIER.
-- **Image-level outlier recall** — what fraction of images with detections had at least one OUTLIER.
-
-For a good OOD detector, both values should be high, because every detected OOD
-object should be classified as an outlier.
-
-#### Verifying correctness
-
-The benchmark runner now compares the VLM's `KNOWN`/`OUTLIER` decision against
-the ground-truth class (taken from the image's parent folder).  It reports a
-confusion matrix and standard classification metrics:
-
-```text
-Ground-truth metrics (folder labels):
-  Confusion matrix: TP=17 TN=0 FP=0 FN=0
-  Accuracy         : 100.00%
-  Precision        : 100.00%
-  Recall           : 100.00%
-  F1-score         : 100.00%
-```
-
-- **TP** — OOD object flagged as OUTLIER
-- **TN** — COCO object flagged as KNOWN
-- **FP** — COCO object wrongly flagged as OUTLIER
-- **FN** — OOD object wrongly flagged as KNOWN
-
-#### Optional: judge VLM decisions
-
-`03_judge_vlm_correctness.py` evaluates each saved crop against the ground-truth
-folder name.  It always reports two deterministic metrics:
-
-* **Class-match accuracy** — does the VLM's `final_class` exactly match the
-  benchmark folder name (ground-truth class)?
-* **Decision accuracy / precision / recall / F1** — is the `KNOWN`/`OUTLIER`
-  decision correct relative to the ground-truth OOD status?
-
-Run the fast deterministic comparison without loading any model:
-
-```bash
-python EdgeAnomalyCCTV/benchmarks/03_judge_vlm_correctness.py \
-    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
-    --skip-llm-judge
-```
-
-You can also ask a second VLM to double-check the first VLM's decisions.
-Two backends are supported: a local Qwen3-VL model or the Kimi API.
-
-First make sure the benchmark was run with `--save-crops`:
-
-```bash
-python EdgeAnomalyCCTV/benchmarks/02_run_ood_benchmark.py \
-    --benchmark-dir benchmark_data/ood_openimages_small \
-    --output-dir benchmark_data/ood_results_small \
-    --save-crops
-```
-
-Then run the judge with a local model:
-
-```bash
-python EdgeAnomalyCCTV/benchmarks/03_judge_vlm_correctness.py \
-    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
-    --judge-backend local \
-    --judge-model Qwen/Qwen3-VL-2B-Instruct
-```
-
-Or run the judge with the Kimi API:
-
-```bash
-python EdgeAnomalyCCTV/benchmarks/03_judge_vlm_correctness.py \
-    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
-    --judge-backend kimi
-```
-
-Credentials are read from a project-root `.env` file by default (e.g.
-`KIMI_API_KEY`, `KIMI_API_BASE`, `KIMI_MODEL_NAME`).  You can still override
-them with environment variables or with `--kimi-api-key`, `--kimi-api-base`,
-and `--kimi-model-name`.
-
-The report is written to `vlm_judgement_report.json` next to the summary file.
-
-> **Note:** a small local judge (e.g. Qwen3-VL-2B) can be unreliable.  For
-> trustworthy human-like review, use a larger model or the Kimi API.
-> `kimi-code` is a reasoning model, so the script sets a large token budget
-> to accommodate its reasoning before the final JSON answer.
-
 ---
 
 ## Paper — Cascading Multi-Agent Anomaly Detection
 
-This folder contains a reproducible implementation of the cascading multi-agent
+> **Detached folder.** `Paper/` is ignored by Git and kept locally for reference.
+
+The folder contains a reproducible implementation of the cascading multi-agent
 anomaly detection framework introduced in the paper *"Cascading Multi-Agent
 Anomaly Detection in Surveillance Systems via Vision-Language Models and
 Embedding-Based Classification"* (arXiv:2601.06204v3).
-
-### Main architecture
-
-1. **Multi-Agent Orchestration**
-   - `MessageBroker`: In-process publish-subscribe broker.
-   - `EventDrivenAgent`: Triggered by asynchronous silent alarms.
-   - `CyclicalMonitoringAgent`: Systematic health checks including Shannon-entropy computation.
-
-2. **Cascading Detection Pipeline** (`CascadingMultiAgentPipeline`)
-   - **Stage I:** `CascadableYOLO` (YOLOv8n) object-level detection.
-   - **Stage II:** `ReconstructionScorer` convolutional autoencoder.
-   - **Stage III:** `VLMReasoner` semantic reasoning with Moondream2, BLIP, LLaVA-7B, or a dummy backend.
-
-3. **System-Level Response**
-   - `joint_severity_score(...)` fuses visual and contextual confidence.
 
 ### Run the paper pipeline
 
@@ -394,30 +357,6 @@ python Paper/cascade.py --all-classes-anomaly
 
 Annotated outputs are saved to `benchmark_results/visualized/`.
 
-### Verification smoke test
-
-```bash
-python - <<'PY'
-import cv2
-from pathlib import Path
-from Paper.cascade import (
-    CascadableYOLO, ReconstructionScorer, VLMReasoner,
-    shannon_entropy, joint_severity_score, CascadingMultiAgentPipeline
-)
-frame = cv2.imread('benchmark_data/legacy/kitchen_person.jpg')
-print(CascadableYOLO(conf_threshold=0.45).infer(frame))
-print(ReconstructionScorer().infer(frame))
-print(VLMReasoner(mode='moondream', device='cpu').infer(frame))
-print('entropy gray:', shannon_entropy(frame * 0 + 128))
-print('severity:', joint_severity_score(0.92, 0.84))
-
-pipe = CascadingMultiAgentPipeline(vlm_mode='moondream', device='cpu')
-for p in sorted(Path('benchmark_data/legacy').glob('*.jpg')):
-    print(f"\n{p.name}:")
-    print(pipe.process_frame(cv2.imread(str(p))))
-PY
-```
-
 ---
 
 ## Project Layout
@@ -427,13 +366,18 @@ PY
 ├── src/                              # YOLO26n / YOLO-World inference scripts
 ├── EdgeAnomalyCCTV/
 │   ├── src/                          # 5-layer edge pipeline
-│   └── benchmarks/                   # OOD-class benchmark helpers
-├── Paper/
+│   └── benchmarks/                   # OOD-class benchmark helpers + matrix runner
+├── Paper/                            # Detached reference folder (ignored by Git)
 │   ├── cascade.py                    # Cascading multi-agent pipeline
 │   └── requirements.txt
 ├── benchmark_data/                   # Sample images, videos, and generated OOD benchmarks
-│   └── legacy/                       # Original bundled sample media (untracked)
+│   ├── benchmark_matrix_results/     # Combined matrix benchmark outputs
+│   ├── legacy/                       # Original bundled sample media
+│   ├── ood_openimages/               # Full OpenImages OOD benchmark
+│   ├── ood_openimages_small/         # Small Caltech101 OOD benchmark
+│   └── ood_results_small/            # Results for the small benchmark
 ├── weights/                          # Model weights
+│   ├── clip/                         # CLIP weights
 │   └── yolo/                         # YOLO .pt files
 ├── edgeanomaly-presentation/         # Vite + React presentation frontend
 ├── requirements.txt                  # Root Python dependencies
