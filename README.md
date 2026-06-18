@@ -239,6 +239,59 @@ Image-level outlier recall   : 100.00%
 For a good OOD detector, both values should be high, because every detected OOD
 object should be classified as an outlier.
 
+#### Verifying correctness
+
+The benchmark runner now compares the VLM's `KNOWN`/`OUTLIER` decision against
+the ground-truth class (taken from the image's parent folder).  It reports a
+confusion matrix and standard classification metrics:
+
+```text
+Ground-truth metrics (folder labels):
+  Confusion matrix: TP=17 TN=0 FP=0 FN=0
+  Accuracy         : 100.00%
+  Precision        : 100.00%
+  Recall           : 100.00%
+  F1-score         : 100.00%
+```
+
+- **TP** — OOD object flagged as OUTLIER
+- **TN** — COCO object flagged as KNOWN
+- **FP** — COCO object wrongly flagged as OUTLIER
+- **FN** — OOD object wrongly flagged as KNOWN
+
+#### Optional: use a second VLM as a judge
+
+If you want an independent model (e.g. Kimi / a larger Qwen-VL) to double-check
+the first VLM's decisions, first re-run the benchmark with crops saved:
+
+```bash
+python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
+    --benchmark-dir benchmark_data/ood_openimages_small \
+    --output-dir benchmark_data/ood_results_small \
+    --save-crops
+```
+
+Then run the judge:
+
+```bash
+python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
+    --summary benchmark_data/ood_results_small/ood_benchmark_summary.json
+```
+
+The judge loads each saved crop and asks a second VLM whether the first VLM's
+`KNOWN`/`OUTLIER` decision is correct.  It writes a report to
+`vlm_judgement_report.json`.
+
+> **Note:** a small local judge (e.g. Qwen3-VL-2B) can be unreliable.  For
+> trustworthy human-like review, use a larger model such as
+> `Qwen/Qwen3-VL-7B-Instruct` or the Kimi API:
+>
+> ```bash
+> python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
+>     --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
+>     --judge-model Qwen/Qwen3-VL-7B-Instruct
+> ```
+
 ---
 
 ## Paper — Cascading Multi-Agent Anomaly Detection

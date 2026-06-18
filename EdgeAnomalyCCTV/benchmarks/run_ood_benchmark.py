@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 # Add repository root / EdgeAnomalyCCTV/src to path
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,6 +67,11 @@ def parse_args() -> argparse.Namespace:
         default="weights/yolo/yolov8n.pt",
         help="YOLOv8 model path/name (default: weights/yolo/yolov8n.pt)",
     )
+    parser.add_argument(
+        "--save-crops",
+        action="store_true",
+        help="Save cropped object images for later review or judging",
+    )
     return parser.parse_args()
 
 
@@ -80,6 +86,18 @@ def _collect_image_paths(benchmark_dir: Path) -> list[Path]:
             continue
         paths.append(p)
     return sorted(paths)
+
+
+def _crop_bbox(frame: np.ndarray, bbox: list) -> np.ndarray:
+    x1, y1, x2, y2 = [int(v) for v in bbox]
+    h, w = frame.shape[:2]
+    x1 = max(0, min(x1, w))
+    x2 = max(0, min(x2, w))
+    y1 = max(0, min(y1, h))
+    y2 = max(0, min(y2, h))
+    if x2 <= x1 or y2 <= y1:
+        return frame
+    return frame[y1:y2, x1:x2]
 
 
 async def run_benchmark(args: argparse.Namespace) -> dict:
@@ -124,10 +142,14 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
             await filtering.process(tracks)
             await filtering.llm_queue.join()
 
+            # Ground-truth class from the parent folder name.
+            gt_class = img_path.parent.name.lower().strip()
+
             # Summarize per-image results
             img_result = {
                 "image": str(img_path),
                 "relative": str(img_path.relative_to(benchmark_dir)),
+                "ground_truth_class": gt_class,
                 "num_detections": len(tracks),
                 "tracks": [],
             }
@@ -146,6 +168,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
 
                 img_result["tracks"].append({
                     "track_id": tid,
+                    "ground_truth_class": gt_class,
                     "yolo_class": track.get("class"),
                     "yolo_display_class": track.get("display_class"),
                     "yolo_conf": track.get("conf"),
@@ -177,6 +200,21 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                     cv2.imwrite(str(vis_path), cv2.imread(str(default_out)))
                     print(f"  visualization saved to: {vis_path}")
 
+            if args.save_crops:
+                crop_dir = output_dir / "crops" / img_path.parent.relative_to(benchmark_dir)
+                crop_dir.mkdir(parents=True, exist_ok=True)
+                for track in tracks:
+                    tid = track["track_id"]
+                    crop = _crop_bbox(frame_data["raw_frame"], track["bbox"])
+                    crop_path = crop_dir / f"{img_path.stem}_{tid}.jpg"
+                    cv2.imwrite(str(crop_path), crop)
+                    # Link crop path back to the track record.
+                    for rec in img_result["tracks"]:
+                        if rec["track_id"] == tid:
+                            rec["crop_path"] = str(crop_path)
+                            break
+                print(f"  {len(tracks)} crop(s) saved to: {crop_dir}")
+
             # Reset per-image track state so the next image starts fresh.
             filtering.track_state_db.clear()
 
@@ -195,6 +233,28 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     total_detections = sum(r["num_detections"] for r in results)
     total_outliers = sum(r["outlier_count"] for r in results)
 
+    # Ground-truth confusion matrix (treat OUTLIER as the positive class).
+    # The folder name of each image is the ground-truth class.
+    tp = tn = fp = fn = 0
+    for r in results:
+        gt_is_ood = is_ood(r.get("ground_truth_class", ""))
+        for track in r.get("tracks", []):
+            status = track.get("status", "UNKNOWN")
+            predicted_outlier = status == "OUTLIER"
+            if predicted_outlier and gt_is_ood:
+                tp += 1
+            elif predicted_outlier and not gt_is_ood:
+                fp += 1
+            elif not predicted_outlier and gt_is_ood:
+                fn += 1
+            else:
+                tn += 1
+
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) else 0.0
+
     summary = {
         "benchmark_dir": str(benchmark_dir),
         "model": args.model,
@@ -206,6 +266,16 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         "total_outliers": total_outliers,
         "outlier_recall": total_outliers / total_detections if total_detections else 0.0,
         "image_level_outlier_recall": images_with_outliers / images_with_detections if images_with_detections else 0.0,
+        "ground_truth_metrics": {
+            "tp": tp,
+            "tn": tn,
+            "fp": fp,
+            "fn": fn,
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1,
+        },
         "results": results,
     }
 
@@ -213,6 +283,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
+    gt = summary["ground_truth_metrics"]
     print(f"\n{'='*60}")
     print("OOD BENCHMARK SUMMARY")
     print(f"{'='*60}")
@@ -223,7 +294,13 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     print(f"Total objects flagged outlier: {total_outliers}")
     print(f"Object-level outlier recall  : {summary['outlier_recall']:.2%}")
     print(f"Image-level outlier recall   : {summary['image_level_outlier_recall']:.2%}")
-    print(f"Summary saved to: {summary_path}")
+    print(f"\nGround-truth metrics (folder labels):")
+    print(f"  Confusion matrix: TP={gt['tp']} TN={gt['tn']} FP={gt['fp']} FN={gt['fn']}")
+    print(f"  Accuracy         : {gt['accuracy']:.2%}")
+    print(f"  Precision        : {gt['precision']:.2%}")
+    print(f"  Recall           : {gt['recall']:.2%}")
+    print(f"  F1-score         : {gt['f1_score']:.2%}")
+    print(f"\nSummary saved to: {summary_path}")
 
     return summary
 
