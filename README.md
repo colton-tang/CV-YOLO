@@ -142,6 +142,7 @@ Helper scripts live in `EdgeAnomalyCCTV/benchmarks/`:
 | `01_prepare_openimages_ood.py` | Download / prepare an OOD image benchmark. |
 | `02_run_ood_benchmark.py` | Run the full pipeline on the benchmark and report statistics. |
 | `03_judge_vlm_correctness.py` | Independently judge VLM decisions (deterministic or LLM-as-a-judge). |
+| `main.py` | One-shot orchestrator that runs all of the above. |
 
 #### How to run it
 
@@ -152,6 +153,41 @@ environment activated:
 cd /Users/t/CV
 source venv/bin/activate
 ```
+
+##### One-shot orchestrator
+
+`main.py` runs the whole evaluation in one command — prepare, run, and judge:
+
+```bash
+# Full pipeline on the small Caltech101 benchmark, with Kimi judge
+python EdgeAnomalyCCTV/benchmarks/main.py --judge-backend kimi
+```
+
+```bash
+# Use a local judge model instead
+python EdgeAnomalyCCTV/benchmarks/main.py --judge-backend local \
+    --judge-model Qwen/Qwen3-VL-2B-Instruct
+```
+
+```bash
+# Skip preparation if the benchmark already exists
+python EdgeAnomalyCCTV/benchmarks/main.py \
+    --skip-prepare \
+    --judge-backend kimi
+```
+
+```bash
+# Larger OpenImages benchmark (requires fiftyone)
+python EdgeAnomalyCCTV/benchmarks/main.py \
+    --backend openimages \
+    --max-per-class 20 \
+    --benchmark-dir benchmark_data/ood_openimages \
+    --output-dir benchmark_data/ood_results \
+    --judge-backend kimi
+```
+
+Use `--skip-prepare`, `--skip-run`, or `--skip-judge` to run only the steps
+you need.  The orchestrator loads credentials from `.env` automatically.
 
 ##### Quick start (no extra installs)
 
