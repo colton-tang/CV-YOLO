@@ -301,13 +301,15 @@ python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
 Or run the judge with the Kimi API:
 
 ```bash
-export KIMI_API_KEY="sk-..."
-export KIMI_API_BASE="https://api.kimi.com/coding"
-export KIMI_MODEL_NAME="kimi-code"
 python EdgeAnomalyCCTV/benchmarks/judge_vlm_correctness.py \
     --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
     --judge-backend kimi
 ```
+
+Credentials are read from a project-root `.env` file by default (e.g.
+`KIMI_API_KEY`, `KIMI_API_BASE`, `KIMI_MODEL_NAME`).  You can still override
+them with environment variables or with `--kimi-api-key`, `--kimi-api-base`,
+and `--kimi-model-name`.
 
 The report is written to `vlm_judgement_report.json` next to the summary file.
 

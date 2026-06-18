@@ -26,10 +26,7 @@ Usage:
         --judge-backend local \
         --judge-model Qwen/Qwen3-VL-2B-Instruct
 
-    # Judge with the Kimi API
-    export KIMI_API_KEY="sk-..."
-    export KIMI_API_BASE="https://api.kimi.com/coding"
-    export KIMI_MODEL_NAME="kimi-code"
+    # Judge with the Kimi API (credentials are read from .env by default)
     python judge_vlm_correctness.py \
         --summary benchmark_data/ood_results_small/ood_benchmark_summary.json \
         --judge-backend kimi
@@ -67,6 +64,39 @@ from constants import COCO_CLASSES  # noqa: E402
 KIMI_DEFAULT_BASE = "https://api.kimi.com/coding"
 KIMI_DEFAULT_MODEL = "kimi-code"
 KIMI_DEFAULT_USER_AGENT = "claude-code/0.1.0"
+
+
+def _load_dotenv(dotenv_path: Path | None = None) -> None:
+    """Load environment variables from a .env file (no external deps)."""
+    if dotenv_path is None:
+        dotenv_path = ROOT / ".env"
+    if not dotenv_path.exists():
+        return
+
+    try:
+        with open(dotenv_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip()
+                if (
+                    (value.startswith('"') and value.endswith('"'))
+                    or (value.startswith("'") and value.endswith("'"))
+                ):
+                    value = value[1:-1]
+                if key and os.environ.get(key) is None:
+                    os.environ[key] = value
+    except Exception as exc:
+        print(f"[JUDGE] warning: could not load {dotenv_path}: {exc}")
+
+
+# Load project-root .env by default so credentials are available without exporting.
+_load_dotenv()
 
 
 def parse_args() -> argparse.Namespace:
