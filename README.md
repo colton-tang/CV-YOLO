@@ -8,6 +8,8 @@ anomaly detection in images and video:
   gating filters, and a VLM outlier classifier.
 - **Paper cascade** (`Paper/cascade.py`) — a reproducible implementation of the
   cascading multi-agent anomaly-detection framework from arXiv:2601.06204v3.
+- **Presentation** (`edgeanomaly-presentation/`) — a Vite + React frontend for
+  demoing / visualizing results.
 
 ---
 
@@ -244,7 +246,7 @@ from Paper.cascade import (
     CascadableYOLO, ReconstructionScorer, VLMReasoner,
     shannon_entropy, joint_severity_score, CascadingMultiAgentPipeline
 )
-frame = cv2.imread('benchmark_data/kitchen_person.jpg')
+frame = cv2.imread('benchmark_data/legacy/kitchen_person.jpg')
 print(CascadableYOLO(conf_threshold=0.45).infer(frame))
 print(ReconstructionScorer().infer(frame))
 print(VLMReasoner(mode='moondream', device='cpu').infer(frame))
@@ -252,7 +254,7 @@ print('entropy gray:', shannon_entropy(frame * 0 + 128))
 print('severity:', joint_severity_score(0.92, 0.84))
 
 pipe = CascadingMultiAgentPipeline(vlm_mode='moondream', device='cpu')
-for p in sorted(Path('benchmark_data').glob('*.jpg')):
+for p in sorted(Path('benchmark_data/legacy').glob('*.jpg')):
     print(f"\n{p.name}:")
     print(pipe.process_frame(cv2.imread(str(p))))
 PY
@@ -272,8 +274,10 @@ PY
 │   ├── cascade.py                    # Cascading multi-agent pipeline
 │   └── requirements.txt
 ├── benchmark_data/                   # Sample images, videos, and generated OOD benchmarks
+│   └── legacy/                       # Original bundled sample media (untracked)
 ├── weights/                          # Model weights
 │   └── yolo/                         # YOLO .pt files
+├── edgeanomaly-presentation/         # Vite + React presentation frontend
 ├── requirements.txt                  # Root Python dependencies
 └── README.md                         # This file
 ```
