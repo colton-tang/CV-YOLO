@@ -142,10 +142,22 @@ Helper scripts live in `EdgeAnomalyCCTV/benchmarks/`:
 | `prepare_openimages_ood.py` | Download / prepare an OOD image benchmark. |
 | `run_ood_benchmark.py` | Run the full pipeline on the benchmark and report statistics. |
 
-#### Quick start (no extra installs)
+#### How to run it
+
+All benchmark scripts should be run from the project root with the virtual
+environment activated:
 
 ```bash
-# Create a small 18-image benchmark from Caltech101 OOD classes
+cd /Users/t/CV
+source venv/bin/activate
+```
+
+##### Quick start (no extra installs)
+
+Uses **Caltech101** via `torchvision` and finishes in a few minutes.
+
+```bash
+# 1. Prepare a small 18-image benchmark (6 OOD classes, 3 images each)
 python EdgeAnomalyCCTV/benchmarks/prepare_openimages_ood.py \
     --backend torchvision \
     --torchvision-dataset Caltech101 \
@@ -153,13 +165,15 @@ python EdgeAnomalyCCTV/benchmarks/prepare_openimages_ood.py \
     --output-dir benchmark_data/ood_openimages_small \
     --classes octopus,lobster,scorpion,helicopter,crab,starfish
 
-# Run the EdgeAnomalyCCTV pipeline on it
+# 2. Run the EdgeAnomalyCCTV pipeline on it
 python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
     --benchmark-dir benchmark_data/ood_openimages_small \
     --output-dir benchmark_data/ood_results_small
 ```
 
-#### Larger / more realistic benchmark (OpenImages)
+Results are saved to `benchmark_data/ood_results_small/ood_benchmark_summary.json`.
+
+##### Larger / more realistic benchmark (OpenImages)
 
 ```bash
 pip install fiftyone
@@ -174,28 +188,56 @@ python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
     --output-dir benchmark_data/ood_results
 ```
 
-#### Use your own images
+##### Use your own images
+
+Organize your images in folders named by class:
+
+```text
+/path/to/your/ood_images/
+├── crab/
+├── helicopter/
+└── scorpion/
+```
 
 ```bash
 python EdgeAnomalyCCTV/benchmarks/prepare_openimages_ood.py \
     --backend local \
     --local-dir /path/to/your/ood_images \
     --output-dir benchmark_data/ood_local
+
+python EdgeAnomalyCCTV/benchmarks/run_ood_benchmark.py \
+    --benchmark-dir benchmark_data/ood_local \
+    --output-dir benchmark_data/ood_results_local
+```
+
+##### Single-image sanity check
+
+Run one OOD image through the main pipeline:
+
+```bash
+python EdgeAnomalyCCTV/src/main.py --mode graph \
+    --input benchmark_data/ood_openimages_small/helicopter/helicopter_5528.jpg
 ```
 
 #### Interpreting results
 
-`run_ood_benchmark.py` reports:
+`run_ood_benchmark.py` prints a summary like this:
 
-- **Total images evaluated**
-- **Images with detections**
-- **Images flagged with outlier**
-- **Total object detections**
-- **Total objects flagged outlier**
-- **Object-level outlier recall** = outlier detections / total detections
-- **Image-level outlier recall** = images with at least one outlier / images with detections
+```text
+Total images evaluated       : 18
+Images with detections       : 13
+Images flagged with outlier  : 13
+Total object detections      : 17
+Total objects flagged outlier: 17
+Object-level outlier recall  : 100.00%
+Image-level outlier recall   : 100.00%
+```
 
-For a perfect OOD detector, both recall values should be high (close to 100%).
+- **Object-level outlier recall** — what fraction of detected objects were flagged as OUTLIER.
+- **Image-level outlier recall** — what fraction of images with detections had at least one OUTLIER.
+
+For a good OOD detector, both values should be high, because every detected OOD
+object should be classified as an outlier.
 
 ---
 
