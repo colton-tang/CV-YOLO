@@ -127,7 +127,7 @@ yolov8n_only                                  0.00%                0.00%
 yolov8n_framework                             0.00%               12.07%
 yolo_world_only                              76.92%                5.13%
 yolo_world_framework                         76.92%               16.67%
-vlm_only                                      —                    —
+vlm_only                                     92.71%               92.71%
 ```
 
 #### Key Concepts & Definitions

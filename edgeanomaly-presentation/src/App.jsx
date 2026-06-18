@@ -16,6 +16,8 @@ import {
   ShieldCheck,
   SquareDashedMousePointer,
 } from 'lucide-react'
+import architectureGraphic from '../../assets/P1.png'
+import smartReviewGraphic from '../../assets/P4.png'
 
 const STATUS_STYLES = {
   RESOLVED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -82,33 +84,9 @@ const slides = [
     ],
   },
   {
-    id: 'orchestration',
-    type: 'orchestration',
-    header: '02. main.py Orchestration',
-    tagline: 'Runtime Control',
-    stages: [
-      'Parse --mode and --input, or fall back to interactive mode selection.',
-      'Resolve the default input: benchmark image for graph mode, camera 0 for video mode.',
-      'Instantiate all five layers and start classifier.run() as a background asyncio task.',
-      'Branch into single-frame graph execution or continuous video loop while preserving the OOD review path.',
-    ],
-    branches: [
-      {
-        title: 'Graph mode OOD path',
-        icon: <FileImage size={20} />,
-        items: ['Single call to ingestion.get_frame()', 'Wait for llm_queue.join() so every OOD candidate is resolved', 'Render final annotated still image once'],
-      },
-      {
-        title: 'Video mode OOD path',
-        icon: <MonitorPlay size={20} />,
-        items: ['OpenCV capture with camera/file/URL support', 'Per-frame detect -> OOD gate -> render loop with async review in parallel', "Exit on 'q' or closed render window"],
-      },
-    ],
-  },
-  {
     id: 'gates',
     type: 'gates',
-    header: '03. OOD Decision Flow',
+    header: '02. OOD Decision Flow',
     tagline: 'State Machine',
     statuses: ['RESOLVED', 'VERIFYING', 'OUTLIER', 'UNKNOWN'],
     example: {
@@ -124,22 +102,22 @@ const slides = [
       },
       {
         title: 'Gate 2: Fast-path known object',
-        body: 'If confidence exceeds HIGH_CONFIDENCE_THRESHOLD and the class is known, the object is treated as in-distribution and auto-passes to RESOLVED.',
+        body: 'If confidence exceeds HIGH_CONFIDENCE_THRESHOLD (0.7) and the class is known, the object is treated as in-distribution and auto-passes to RESOLVED.',
       },
       {
         title: 'Gate 3: OOD candidate',
-        body: 'Tracks in the uncertainty band or outside known_classes are treated as potential OOD objects, enter VERIFYING, and are queued for vision-language review once.',
+        body: 'Tracks in the uncertainty band (0.3 - 0.7) or outside known_classes are treated as potential OOD objects, enter VERIFYING, and are queued for vision-language review once.',
       },
       {
         title: 'Below low threshold',
-        body: 'Detections below LOW_CONFIDENCE_THRESHOLD are ignored so the OOD path is reserved for meaningful candidates rather than noise.',
+        body: 'Detections below LOW_CONFIDENCE_THRESHOLD (0.3) are ignored so the OOD path is reserved for meaningful candidates rather than noise.',
       },
     ],
   },
   {
     id: 'async',
     type: 'async',
-    header: '04. Smart Review for Unusual Objects',
+    header: '03. Smart Review for Unusual Objects',
     tagline: 'Background Verification',
     flow: [
       { name: 'Scan the scene', detail: 'The system checks each frame and identifies what is happening.' },
@@ -158,7 +136,7 @@ const slides = [
   {
     id: 'benchmark',
     type: 'benchmark',
-    header: '05. Performance Benchmarks',
+    header: '04. Performance Benchmarks',
     tagline: 'Matrix Evaluation',
     variants: [
       {
@@ -183,15 +161,15 @@ const slides = [
       },
       {
         name: 'vlm_only',
-        oodDetectionRate: '—',
-        llmJudgeAccuracy: '—',
+        oodDetectionRate: '92.71%',
+        llmJudgeAccuracy: '92.71%',
       },
     ],
   },
   {
     id: 'future',
     type: 'future',
-    header: '06. Future Development',
+    header: '05. Future Development',
     tagline: 'Roadmap & Horizon',
     objectives: [
       {
@@ -433,7 +411,7 @@ function SlideView({ slide, slideIndex, mode = 'screen', slideRef }) {
   const isExportMode = mode === 'export'
   const shellClass = isExportMode
     ? 'slide-panel diagram-grid flex h-[900px] w-[1600px] flex-col overflow-hidden rounded-none p-16'
-    : 'slide-panel diagram-grid mx-auto aspect-[16/9] w-full max-w-7xl rounded-[28px] p-6 shadow-panel backdrop-blur md:p-10'
+    : 'slide-panel diagram-grid mx-auto aspect-[16/9] min-h-[580px] w-full max-w-7xl rounded-[28px] p-6 shadow-panel backdrop-blur md:p-8 flex flex-col overflow-hidden'
 
   return (
     <section ref={slideRef} className={shellClass}>
@@ -448,59 +426,111 @@ function SlideView({ slide, slideIndex, mode = 'screen', slideRef }) {
 
 function CoverSlide({ slide }) {
   return (
-    <div className="flex h-full flex-col justify-between">
-      <div className="grid gap-6 md:grid-cols-[1.38fr_0.62fr]">
-        <div className="max-w-5xl space-y-5">
-          <span className="section-label">{slide.kicker}</span>
-          <div className="space-y-4">
-            <h2 className="display-serif max-w-4xl text-[4.4rem] leading-[0.9] text-slate-900 md:text-[5rem]">
-              {slide.title}
-            </h2>
-            <p className="max-w-4xl text-[1.3rem] leading-relaxed text-slate-600 md:text-[1.55rem]">{slide.subtitle}</p>
+    <div className="grid h-full gap-8 lg:grid-cols-[1.15fr_0.85fr] items-center overflow-hidden py-2">
+      {/* Left Column: Title & Presenter Info */}
+      <div className="flex flex-col justify-between h-full space-y-6">
+        <div>
+          {/* Glowing Kicker */}
+          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200/50 bg-cyan-50/50 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-cyan-800">
+            <span className="flex h-2 w-2 rounded-full bg-cyan-500 animate-pulse" />
+            {slide.kicker}
           </div>
-          <div className="deck-card max-w-4xl rounded-[22px] p-6">
-            <p className="section-label text-emerald-700">Core Thesis</p>
-            <p className="mt-3 text-[1.08rem] leading-relaxed text-slate-700 md:text-[1.28rem]">{slide.valueHook}</p>
-          </div>
+          
+          {/* Display Title with Gradient */}
+          <h1 className="display-serif mt-5 text-[3.8rem] leading-[0.95] tracking-tight text-slate-900 md:text-[4.5rem]">
+            Edge Anomaly <br />
+            <span className="bg-gradient-to-r from-cyan-600 via-teal-600 to-amber-500 bg-clip-text text-transparent">
+              Detection Framework
+            </span>
+          </h1>
+          
+          <p className="mt-4 max-w-2xl text-[1.08rem] leading-relaxed text-slate-600 md:text-[1.2rem]">
+            An intelligent edge surveillance pipeline that fast-paths known in-distribution objects and escalates Out-of-Distribution candidates for deeper vision-language verification.
+          </p>
         </div>
 
-        <div className="deck-card-dark rounded-[24px] p-6 text-white">
-          <p className="section-label text-cyan-200">OOD Strategy</p>
-          <div className="mt-5 space-y-3 text-sm leading-relaxed text-slate-200">
-            <div className="subtle-rule pt-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Fast Path</p>
-              <p className="mt-2 text-base text-white">Known + high confidence {'->'} <span className="mono-note">RESOLVED</span></p>
+        {/* Presenter Profile Box */}
+        <div className="border-t border-slate-200/80 pt-5">
+          <p className="text-[0.7rem] font-bold uppercase tracking-[0.2em] text-slate-400">Presented By</p>
+          <div className="mt-3 flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-700 to-teal-800 text-lg font-bold text-white shadow-md">
+              QT
             </div>
-            <div className="subtle-rule pt-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Review Path</p>
-              <p className="mt-2 text-base text-white">Uncertain or unknown {'->'} <span className="mono-note">VERIFYING</span> {'->'} VLM decision</p>
-            </div>
-            <div className="subtle-rule pt-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Operational Goal</p>
-              <p className="mt-2 text-base text-white">Keep video throughput fast while escalating suspicious objects selectively.</p>
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 leading-none">Qinxing Tang</h3>
+              <p className="mt-1 text-sm font-semibold text-cyan-800 leading-tight">
+                M.Sc. Candidate, Financial Engineering
+              </p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                National University of Singapore • <span className="font-mono">Qinxing_tang@u.nus.edu</span>
+              </p>
+              <p className="text-[0.7rem] text-slate-400 mt-1 uppercase font-bold tracking-wider">
+                19th June 2026
+              </p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[1.25fr_0.75fr]">
-        <div className="deck-card-dark rounded-[22px] p-6 text-white">
-          <p className="section-label text-cyan-200">Pipeline Shape</p>
-          <div className="mt-4 flex flex-wrap items-center gap-3 text-sm font-semibold">
-            {['Ingestion', 'Detection', 'OOD Gate', 'VLM Review', 'Render'].map((item, index) => (
-              <div key={item} className="flex items-center gap-3">
-                <span className="rounded-[12px] border border-white/10 bg-white/5 px-4 py-2">{item}</span>
-                {index < 4 && <ArrowRight size={16} className="text-cyan-200" />}
+      {/* Right Column: Visual Pipeline Flow Graphic */}
+      <div className="deck-card relative rounded-[28px] p-6 text-slate-800 h-full flex flex-col justify-between overflow-hidden shadow-panel backdrop-blur">
+        {/* Subtle glowing radial background graphics */}
+        <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-cyan-500/5 blur-[80px] pointer-events-none" />
+        <div className="absolute -left-20 -bottom-20 h-64 w-64 rounded-full bg-amber-500/5 blur-[80px] pointer-events-none" />
+
+        <div className="relative">
+          <p className="section-label text-cyan-700">5-Layer Pipeline Flow</p>
+          <p className="mt-1 text-xs text-slate-500">Unified frame stream normalizer to status-aware alert rendering.</p>
+          
+          <div className="mt-5 space-y-2.5">
+            {[
+              { num: 'L1', name: 'Ingestion', desc: 'Unified camera/file stream normalizer' },
+              { num: 'L2', name: 'Detection & Tracking', desc: 'YOLO + BotSort track history' },
+              { num: 'L3', name: 'OOD Gate Filter', desc: 'Confidence boundary check (0.3 - 0.7)', glow: true },
+              { num: 'L4', name: 'Async OOD Verifier', desc: 'Background Qwen-VL review' },
+              { num: 'L5', name: 'Render & Alert', desc: 'Operator UI annotation & alerts' }
+            ].map((step, index) => (
+              <div 
+                key={step.name} 
+                className={`relative flex items-center gap-3 rounded-[14px] border p-2 transition ${
+                  step.glow 
+                    ? 'border-cyan-400 bg-cyan-50/70 shadow-[0_0_12px_rgba(6,182,212,0.1)]' 
+                    : 'border-slate-100 bg-white/70 shadow-sm'
+                }`}
+              >
+                {/* Connecting Line */}
+                {index < 4 && (
+                  <div className="absolute left-[21px] top-[30px] w-[2px] h-[16px] bg-slate-200" />
+                )}
+
+                <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-[0.7rem] font-bold ${
+                  step.glow 
+                    ? 'bg-cyan-600 text-white shadow-[0_0_10px_rgba(8,145,178,0.3)]' 
+                    : 'bg-slate-100 text-slate-600 border border-slate-200'
+                }`}>
+                  {step.num}
+                </div>
+                
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[0.72rem] font-bold text-slate-800 leading-none">{step.name}</h4>
+                    {step.glow && (
+                      <span className="rounded-full bg-cyan-100/80 px-1.5 py-0.5 text-[0.55rem] font-bold text-cyan-800 border border-cyan-200/50 uppercase tracking-wider">
+                        OOD Decision Boundary
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-[0.66rem] leading-none text-slate-500 break-words truncate">{step.desc}</p>
+                </div>
               </div>
             ))}
           </div>
         </div>
-        <div className="deck-card rounded-[22px] p-6">
-          <p className="section-label text-slate-500">Presentation Focus</p>
-          <div className="mt-4 space-y-3 text-base text-slate-700">
-            <p>{slide.author.project}</p>
-            <p>{slide.author.focus}</p>
-          </div>
+
+        {/* Footnote */}
+        <div className="relative border-t border-slate-100 pt-3 mt-4 flex items-center justify-between text-[0.68rem] text-slate-500">
+          <span>Project: EdgeAnomalyCCTV</span>
+          <span className="font-mono text-cyan-700">main.py runtime</span>
         </div>
       </div>
     </div>
@@ -510,19 +540,19 @@ function CoverSlide({ slide }) {
 function StandardSlide({ slide, slideIndex, isExportMode }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-8 flex items-start justify-between gap-4">
+      <div className="mb-4 md:mb-5 flex items-start justify-between gap-4">
         <div className="max-w-4xl">
-          <p className="section-label mb-3">{slide.tagline}</p>
-          <h2 className={`${isExportMode ? 'text-[3.6rem]' : 'text-[2.65rem] md:text-[4rem]'} display-serif leading-[0.93] text-slate-900`}>
+          <p className="section-label mb-1">{slide.tagline}</p>
+          <h2 className={`${isExportMode ? 'text-[3.6rem]' : 'text-[1.8rem] md:text-[2.5rem]'} display-serif leading-[0.93] text-slate-900`}>
             {slide.header}
           </h2>
         </div>
-        <div className="rounded-[18px] border border-slate-200 bg-[rgba(255,252,246,0.85)] px-5 py-3 text-4xl font-black text-slate-200">
+        <div className="rounded-[18px] border border-slate-200 bg-[rgba(255,252,246,0.85)] px-4 py-2 text-2xl md:text-3xl font-black text-slate-200">
           0{slideIndex}
         </div>
       </div>
 
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         {slide.type === 'architecture' && <ArchitectureSlide slide={slide} />}
         {slide.type === 'orchestration' && <OrchestrationSlide slide={slide} />}
         {slide.type === 'gates' && <GatesSlide slide={slide} />}
@@ -536,30 +566,12 @@ function StandardSlide({ slide, slideIndex, isExportMode }) {
 
 function ArchitectureSlide({ slide }) {
   return (
-    <div className="grid h-full gap-5 md:grid-cols-5">
-      {slide.layers.map((layer) => (
-        <div key={layer.name} className="deck-card flex flex-col rounded-[22px] p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <span className="rounded-[10px] bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-              {layer.title}
-            </span>
-            <div className="rounded-[12px] bg-cyan-50 p-3 text-cyan-700">{layer.icon}</div>
-          </div>
-          <div className="min-h-[5.9rem]">
-            <h3 className="text-[1.08rem] font-semibold leading-snug text-slate-900 md:text-[1.2rem]">
-              {layer.label}
-            </h3>
-            <p className="mono-note mt-2 break-words text-[0.76rem] leading-relaxed text-cyan-800 md:text-[0.8rem]">
-              {layer.name}
-            </p>
-          </div>
-          <div className="mt-4 space-y-3 text-sm leading-relaxed text-slate-600">
-            {layer.points.map((point) => (
-              <p key={point}>{point}</p>
-            ))}
-          </div>
-        </div>
-      ))}
+    <div className="deck-card relative h-full overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_20px_44px_rgba(18,35,58,0.08)]">
+      <img
+        src={architectureGraphic}
+        alt="Five-layer architecture system map"
+        className="h-full w-full object-contain object-center"
+      />
     </div>
   )
 }
@@ -605,62 +617,84 @@ function OrchestrationSlide({ slide }) {
 
 function GatesSlide({ slide }) {
   return (
-    <div className="grid h-full gap-5 md:grid-cols-[0.74fr_1.26fr]">
-      <div className="space-y-4">
-        <div className="deck-card rounded-[22px] p-5">
-          <div className="mb-4 flex items-center gap-3">
-            <ShieldCheck className="text-cyan-700" />
-            <h3 className="text-2xl font-semibold text-slate-900">State outcomes</h3>
+    <div className="grid h-full gap-4 md:grid-cols-[1.05fr_0.95fr] overflow-hidden">
+      {/* Left Column: Detector Output */}
+      <div className="deck-card flex flex-col rounded-[22px] p-4 overflow-hidden h-full">
+        <div className="mb-2 flex items-start justify-between gap-4 shrink-0">
+          <div>
+            <p className="section-label">Annotated Output</p>
+            <h3 className="mt-1 text-[1.1rem] font-bold text-slate-900 leading-snug">Base yolov8n result on bus.jpg</h3>
+            <p className="text-[0.75rem] text-slate-500 mt-0.5">{slide.example.subtitle}</p>
           </div>
-          <div className="grid gap-3">
-            {slide.statuses.map((status) => (
-              <div key={status} className={`rounded-[16px] border px-4 py-3 text-base font-semibold ${STATUS_STYLES[status]}`}>
-                {status}
-              </div>
-            ))}
-          </div>
+          <span className="rounded-[8px] border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[0.7rem] font-bold text-emerald-700 shrink-0">
+            Resolved
+          </span>
         </div>
 
-        <div className="deck-card-dark rounded-[22px] p-5 text-white">
-          <p className="section-label text-cyan-200">Real Example</p>
-          <h3 className="mt-3 text-[1.35rem] font-semibold leading-snug">{slide.example.title}</h3>
-          <p className="mt-2 text-sm leading-relaxed text-slate-200">{slide.example.subtitle}</p>
-          <div className="mt-4 space-y-2 text-sm leading-relaxed text-slate-100">
-            {slide.example.facts.map((fact) => (
-              <p key={fact}>{fact}</p>
-            ))}
-          </div>
+        <div className="flex-1 min-h-0 overflow-hidden rounded-[14px] border border-slate-200 bg-slate-50 flex items-center justify-center p-1.5">
+          <img
+            src={slide.example.image}
+            alt="Annotated detector output showing a bus and three people labeled as resolved."
+            className="h-full max-w-full object-contain object-center"
+          />
+        </div>
+
+        <div className="mt-2.5 grid gap-2 md:grid-cols-3 shrink-0">
+          {slide.example.facts.map((fact) => (
+            <div key={fact} className="rounded-[10px] border border-slate-150 bg-slate-50/70 px-2 py-1 text-[0.7rem] font-semibold text-slate-600 text-center">
+              {fact}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="grid gap-4">
-        <div className="deck-card overflow-hidden rounded-[22px] p-4">
-          <div className="mb-3 flex items-center justify-between gap-4">
-            <div>
-              <p className="section-label">Annotated Output</p>
-              <h3 className="mt-2 text-xl font-semibold text-slate-900">Base `yolov8n` result on `bus.jpg`</h3>
+      {/* Right Column: Outcomes & Gates */}
+      <div className="flex h-full flex-col gap-3 overflow-hidden">
+        {/* State Outcomes & Thresholds */}
+        <div className="deck-card rounded-[22px] p-3 grid grid-cols-[1fr_1.4fr] gap-3">
+          <div>
+            <div className="mb-1.5 flex items-center gap-2">
+              <ShieldCheck className="text-cyan-700" size={16} />
+              <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-cyan-805">State outcomes</h3>
             </div>
-            <span className="rounded-[12px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
-              All detections resolved
-            </span>
+            <div className="grid gap-1 grid-cols-2">
+              {slide.statuses.map((status) => (
+                <div key={status} className={`rounded-[8px] border px-2 py-0.5 text-center text-[0.7rem] font-bold ${STATUS_STYLES[status]}`}>
+                  {status}
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="overflow-hidden rounded-[18px] border border-slate-200 bg-slate-100">
-            <img
-              src={slide.example.image}
-              alt="Annotated detector output showing a bus and three people labeled as resolved."
-              className="h-[21.5rem] w-full object-cover object-center"
-            />
+
+          <div className="border-l border-slate-200/80 pl-3">
+            <div className="mb-1.5 flex items-center gap-2">
+              <SquareDashedMousePointer className="text-amber-600" size={14} />
+              <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-cyan-805">Thresholds</h3>
+            </div>
+            <div className="space-y-1 text-[0.56rem] md:text-[0.62rem]">
+              <div className="flex justify-between items-center rounded-[8px] border border-slate-200/60 bg-slate-50/50 px-2 py-0.5">
+                <span className="font-mono text-slate-500">LOW_CONFIDENCE_THRESHOLD</span>
+                <span className="font-mono font-bold text-amber-700 ml-2">0.3</span>
+              </div>
+              <div className="flex justify-between items-center rounded-[8px] border border-slate-200/60 bg-slate-50/50 px-2 py-0.5">
+                <span className="font-mono text-slate-500">HIGH_CONFIDENCE_THRESHOLD</span>
+                <span className="font-mono font-bold text-emerald-700 ml-2">0.7</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
+        {/* Gates Grid */}
+        <div className="grid flex-1 gap-2 md:grid-cols-2 min-h-0">
           {slide.gates.map((gate) => (
-            <div key={gate.title} className="deck-card rounded-[20px] p-4">
-              <div className="mb-2 flex items-center gap-3">
-                <SquareDashedMousePointer className="text-amber-600" size={18} />
-                <h3 className="text-lg font-semibold text-slate-900 md:text-xl">{gate.title}</h3>
+            <div key={gate.title} className="deck-card rounded-[18px] p-3.5 flex flex-col justify-between overflow-hidden">
+              <div>
+                <div className="mb-1.5 flex items-center gap-2">
+                  <SquareDashedMousePointer className="shrink-0 text-amber-600" size={15} />
+                  <h3 className="text-[0.84rem] font-bold text-slate-900 leading-snug">{gate.title}</h3>
+                </div>
+                <p className="text-[0.76rem] leading-relaxed text-slate-600">{gate.body}</p>
               </div>
-              <p className="text-[0.98rem] leading-relaxed text-slate-600">{gate.body}</p>
             </div>
           ))}
         </div>
@@ -671,49 +705,85 @@ function GatesSlide({ slide }) {
 
 function AsyncSlide({ slide }) {
   return (
-    <div className="grid h-full gap-5 md:grid-cols-[1.02fr_0.98fr]">
-      <div className="deck-card rounded-[22px] p-6">
-        <div className="mb-4 flex items-center gap-3">
-          <ListTree className="text-cyan-700" />
-          <h3 className="text-2xl font-semibold text-slate-900">How the review works</h3>
+    <div className="grid h-full gap-4 md:grid-cols-[1.24fr_0.76fr] overflow-hidden">
+      <div className="deck-card flex flex-col rounded-[22px] p-4 overflow-hidden">
+        <div>
+          <div className="mb-3 flex items-center justify-between gap-3 border-b border-slate-100 pb-2">
+            <div className="flex items-center gap-2">
+              <ListTree className="text-cyan-700" size={18} />
+              <h3 className="text-base font-bold text-slate-900 md:text-lg">Smart review sequence</h3>
+            </div>
+            <span className="rounded-[999px] border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[0.62rem] font-bold uppercase tracking-[0.16em] text-cyan-800">
+              Selective escalation
+            </span>
+          </div>
+          <div className="overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-[0_16px_36px_rgba(18,35,58,0.08)]">
+            <img
+              src={smartReviewGraphic}
+              alt="Four-step smart review sequence for unusual objects"
+              className="h-full w-full object-cover object-center"
+            />
+          </div>
         </div>
-        <div className="space-y-3">
+
+        <div className="mt-3 grid gap-2 md:grid-cols-4">
           {slide.flow.map((step, index) => (
-            <div key={step.name} className="flex items-start gap-3 rounded-[18px] border border-slate-200/80 bg-slate-50/80 p-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-cyan-700 text-sm font-bold text-white">
-                {index + 1}
+            <div key={step.name} className="rounded-[14px] border border-slate-200/80 bg-slate-50/80 p-2.5">
+              <div className="mb-1.5 flex items-center gap-2">
+                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] bg-cyan-700 text-[0.7rem] font-bold text-white">
+                  {index + 1}
+                </div>
+                <h4 className="text-[0.72rem] font-bold leading-tight text-slate-900">{step.name}</h4>
               </div>
-              <div className="flex-1">
-                <h4 className="text-[1rem] font-semibold text-slate-900 md:text-[1.08rem]">{step.name}</h4>
-                <p className="mt-1 text-[0.95rem] leading-relaxed text-slate-600">{step.detail}</p>
-              </div>
+              <p className="text-[0.66rem] leading-snug text-slate-500">{step.detail}</p>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-rows-[auto_auto_1fr]">
-        <div className="deck-card rounded-[22px] border-cyan-200 bg-cyan-50/80 p-6">
-          <div className="mb-3 flex items-center gap-3 text-cyan-700">
-            <Cpu size={22} />
-            <h3 className="text-xl font-semibold">Why this matters</h3>
+      <div className="deck-card flex flex-col justify-between rounded-[22px] p-4 overflow-hidden">
+        <div className="space-y-3.5">
+          <div>
+            <div className="mb-1.5 flex items-center gap-2">
+              <Cpu className="text-cyan-700" size={16} />
+              <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-cyan-800">Why this matters</h3>
+            </div>
+            <p className="text-[0.78rem] leading-relaxed text-slate-600">{slide.summary}</p>
           </div>
-          <p className="text-base leading-relaxed text-cyan-900">{slide.summary}</p>
+
+          <div className="rounded-[16px] border border-emerald-200 bg-emerald-50/70 p-3">
+            <p className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-emerald-700">Operational takeaway</p>
+            <p className="mt-1.5 text-[0.74rem] leading-relaxed text-emerald-900">
+              The operator keeps a live view while the system quietly double-checks only the detections that look unfamiliar.
+            </p>
+          </div>
+
+          <div className="border-t border-slate-200 pt-2.5">
+            <p className="mb-2 text-[0.68rem] font-bold uppercase tracking-[0.12em] text-slate-400">Stakeholder value</p>
+            <div className="grid gap-1.5 grid-cols-1">
+              {slide.benefits.map((benefit) => (
+                <div
+                  key={benefit}
+                  className="rounded-[10px] border border-slate-200 bg-slate-50/70 px-2.5 py-2 text-[0.72rem] font-semibold text-slate-600"
+                >
+                  {benefit}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-slate-200 pt-2.5">
+            <p className="mb-2 text-[0.68rem] font-bold uppercase tracking-[0.12em] text-slate-400">Review trigger</p>
+            <div className="rounded-[14px] border border-amber-200 bg-amber-50/80 p-3">
+              <p className="text-[0.74rem] leading-relaxed text-slate-700">
+                Objects that are low-confidence, ambiguous, or outside the known class set are escalated into background verification.
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="deck-card rounded-[22px] p-6">
-          <p className="section-label">Stakeholder Value</p>
-          <div className="mt-4 space-y-3">
-            {slide.benefits.map((benefit) => (
-              <div key={benefit} className="rounded-[16px] border border-slate-200 bg-slate-50/80 px-4 py-3 text-[0.98rem] font-medium text-slate-700">
-                {benefit}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="deck-card-dark rounded-[22px] p-6 text-base leading-relaxed text-slate-100">
-          Unusual objects still get extra scrutiny, but the rest of the scene keeps moving without interruption.
+        <div className="deck-card-dark mt-3 rounded-[10px] p-2 text-[0.7rem] leading-relaxed text-slate-200 text-center">
+          Unusual objects get extra scrutiny, but the rest of the scene keeps moving.
         </div>
       </div>
     </div>
@@ -752,7 +822,7 @@ function BenchmarkSlide({ slide }) {
               </p>
             </div>
             <div className="flex flex-col gap-1 items-end text-[0.68rem] font-semibold text-slate-500">
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 border border-slate-200/50">Dataset: OpenImages OOD (96 pics, max 3/class)</span>
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 border border-slate-200/50">Dataset: OpenImages OOD (96 pics)</span>
               <span className="rounded bg-cyan-50 text-cyan-700 px-1.5 py-0.5 border border-cyan-150">Judge: Kimi VLM</span>
             </div>
           </div>
