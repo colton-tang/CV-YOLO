@@ -2,5 +2,9 @@ ultralytics>=8.4.0
 git+https://github.com/ultralytics/CLIP.git
 transformers>=4.57.0
 torch>=2.1.0
+torchvision>=0.16.0
 Pillow>=10.0.0
 qwen-vl-utils>=0.0.10
+opencv-python>=4.8.0
+requests>=2.31.0
+numpy>=1.24.0
