@@ -177,6 +177,57 @@ const slides = [
     closing:
       'The framework handles OOD by separating fast inlier acceptance from selective anomaly verification, so the runtime stays responsive while still escalating suspicious objects for deeper review.',
   },
+  {
+    id: 'benchmark',
+    type: 'benchmark',
+    header: '06. Performance Benchmarks',
+    tagline: 'Matrix Evaluation',
+    variants: [
+      {
+        name: 'yolov8n_framework',
+        oodDetectionRate: '0.00%',
+        llmJudgeAccuracy: '12.07%',
+      },
+      {
+        name: 'yolo_world_only',
+        oodDetectionRate: '76.92%',
+        llmJudgeAccuracy: '5.13%',
+      },
+      {
+        name: 'yolo_world_framework',
+        oodDetectionRate: '76.92%',
+        llmJudgeAccuracy: '16.67%',
+      },
+    ],
+  },
+  {
+    id: 'future',
+    type: 'future',
+    header: '07. Future Development',
+    tagline: 'Roadmap & Horizon',
+    objectives: [
+      {
+        title: 'YOLO Fine-Tuning for OOD',
+        icon: <Radar size={22} />,
+        detail: "Fine-tune the YOLO detector on target-domain inliers. This sharpens boundary features and increases the model's class-specific confidence gap, improving the accuracy of initial OOD gate filters.",
+      },
+      {
+        title: 'VLM Distillation to the Edge',
+        icon: <Cpu size={22} />,
+        detail: 'Distill heavy multimodal reasoning (e.g., Qwen-VL) into a compact, specialized edge classifier, or leverage quantized INT4/INT8 formats to fit tight VRAM constraints.',
+      },
+      {
+        title: 'Active Learning Feedback Loop',
+        icon: <GitBranch size={22} />,
+        detail: 'Establish an automatic pipeline where edge-detected OOD outliers are flagged, reviewed by human operators, and sent back to a central server to continuously retrain the detectors.',
+      },
+      {
+        title: 'TensorRT & ONNX Acceleration',
+        icon: <Clock3 size={22} />,
+        detail: 'Port the YOLO detector and the local verification logic to TensorRT or ONNX Runtime to minimize latency and maximize frame throughput on target edge devices.',
+      },
+    ],
+  },
 ]
 
 function App() {
@@ -479,7 +530,7 @@ function StandardSlide({ slide, slideIndex, isExportMode }) {
           </h2>
         </div>
         <div className="rounded-[18px] border border-slate-200 bg-[rgba(255,252,246,0.85)] px-5 py-3 text-4xl font-black text-slate-200">
-          0{slideIndex + 1}
+          0{slideIndex}
         </div>
       </div>
 
@@ -489,6 +540,8 @@ function StandardSlide({ slide, slideIndex, isExportMode }) {
         {slide.type === 'gates' && <GatesSlide slide={slide} />}
         {slide.type === 'async' && <AsyncSlide slide={slide} />}
         {slide.type === 'outputs' && <OutputsSlide slide={slide} />}
+        {slide.type === 'benchmark' && <BenchmarkSlide slide={slide} />}
+        {slide.type === 'future' && <FutureSlide slide={slide} />}
       </div>
     </div>
   )
@@ -674,6 +727,124 @@ function OutputsSlide({ slide }) {
             <span className="section-label text-amber-200">Takeaway</span>
           </div>
           <p>{slide.closing}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FutureSlide({ slide }) {
+  return (
+    <div className="grid h-full gap-5 md:grid-cols-2 md:grid-rows-2">
+      {slide.objectives.map((obj) => (
+        <div key={obj.title} className="deck-card flex flex-col justify-between rounded-[22px] p-6">
+          <div>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-xl font-bold text-slate-900 md:text-2xl">{obj.title}</h3>
+              <div className="rounded-[12px] bg-cyan-50 p-3 text-cyan-700">{obj.icon}</div>
+            </div>
+            <p className="text-base leading-relaxed text-slate-600">{obj.detail}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function BenchmarkSlide({ slide }) {
+  return (
+    <div className="grid h-full gap-5 md:grid-cols-[1.25fr_0.75fr] overflow-hidden">
+      {/* Main Table Card */}
+      <div className="deck-card flex flex-col justify-between rounded-[22px] p-5 overflow-hidden">
+        <div>
+          <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-2.5">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900 md:text-xl">OOD Evaluation Matrix</h3>
+              <p className="text-[0.7rem] text-slate-500 mt-0.5">
+                Key performance metrics generated across different detector/framework combinations.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1 items-end text-[0.68rem] font-semibold text-slate-500">
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 border border-slate-200/50">Dataset: OpenImages OOD</span>
+              <span className="rounded bg-cyan-50 text-cyan-700 px-1.5 py-0.5 border border-cyan-150">Judge: Kimi VLM</span>
+            </div>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-550 font-bold uppercase tracking-[0.05em] text-[0.7rem]">
+                  <th className="py-2.5 pr-4">Variant</th>
+                  <th className="py-2.5 px-4 text-right">OOD Detection Rate</th>
+                  <th className="py-2.5 pl-4 text-right">LLM Judge Accuracy</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700 text-sm">
+                {slide.variants.map((v) => (
+                  <tr key={v.name} className="hover:bg-slate-50/50">
+                    <td className="py-3 pr-4 font-mono font-semibold text-slate-900">{v.name}</td>
+                    <td className="py-3 px-4 text-right text-slate-900 font-semibold">{v.oodDetectionRate}</td>
+                    <td className="py-3 pl-4 text-right text-slate-900 font-semibold">{v.llmJudgeAccuracy}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between rounded-[12px] bg-emerald-50/60 border border-emerald-250/50 p-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-2 w-2 rounded-full bg-emerald-500" />
+            <p className="text-xs text-slate-700 font-semibold">
+              Benchmark execution completed. Matrix results successfully populated.
+            </p>
+          </div>
+          <span className="text-[0.68rem] text-slate-400 font-mono">Outputs: benchmark_matrix_summary.json</span>
+        </div>
+      </div>
+
+      {/* Definition & Comparison Card */}
+      <div className="deck-card flex flex-col justify-between rounded-[22px] p-5">
+        <div className="space-y-3">
+          <div>
+            <h4 className="text-[0.7rem] font-bold uppercase tracking-[0.12em] text-cyan-805 mb-1.5">Evaluation Modes</h4>
+            <div className="space-y-2">
+              <div>
+                <span className="inline-flex rounded-[6px] bg-cyan-50 text-cyan-700 border border-cyan-150 px-1.5 py-0.5 text-[0.68rem] font-bold font-mono">framework</span>
+                <p className="mt-0.5 text-[0.68rem] text-slate-500 leading-normal">
+                  Evaluates the full 5-layer pipeline: filters YOLO detections through outlier gates and enqueues candidates for asynchronous VLM verification.
+                </p>
+              </div>
+              <div className="border-t border-slate-100 pt-2">
+                <span className="inline-flex rounded-[6px] bg-slate-100 text-slate-600 border border-slate-200 px-1.5 py-0.5 text-[0.68rem] font-bold font-mono">only (detector-only)</span>
+                <p className="mt-0.5 text-[0.68rem] text-slate-500 leading-normal">
+                  Evaluates the detector in isolation. Outlier decisions are based solely on raw predictions of non-COCO classes, bypassing VLM verification.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-150 pt-2.5">
+            <h4 className="text-[0.7rem] font-bold uppercase tracking-[0.12em] text-cyan-805 mb-1.5">Detector Models</h4>
+            <div className="space-y-2">
+              <div>
+                <span className="text-[0.7rem] font-bold text-slate-900">YOLOv8n (Closed-Set)</span>
+                <p className="mt-0.5 text-[0.68rem] text-slate-500 leading-normal">
+                  Lightweight model limited to standard COCO classes (80 types). Relies heavily on confidence gating and VLM to detect outliers.
+                </p>
+              </div>
+              <div className="border-t border-slate-100 pt-2">
+                <span className="text-[0.7rem] font-bold text-slate-900">YOLO-World (Open-Vocabulary)</span>
+                <p className="mt-0.5 text-[0.68rem] text-slate-500 leading-normal">
+                  Capable of recognizing arbitrary classes at detection time via custom text prompts.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="text-[0.68rem] text-slate-400 pt-2 border-t border-slate-100 font-mono">
+          Focus: Known vs. Out-of-Distribution (OOD)
         </div>
       </div>
     </div>

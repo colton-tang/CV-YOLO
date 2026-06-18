@@ -1,9 +1,27 @@
 #!/usr/bin/env python3
 """
 Run a benchmark matrix across multiple detector/framework combinations.
+
+This orchestrator now supports:
+
+* yolov8n_framework       – full EdgeAnomalyCCTV pipeline with YOLOv8n
+* yolo_world_framework    – full pipeline with YOLO-World
+* yolo_world_only         – derived detector-only view of yolo_world_framework
+                            (no second benchmark run)
+* yolov8n_only            – synthetic zero-result baseline (0% across the board)
+* vlm_only                – Kimi API vision-only baseline
+
+Usage:
+    python EdgeAnomalyCCTV/benchmarks/run_benchmark_matrix.py \
+        --judge-backend kimi
+
+    # Run a subset of variants
+    python EdgeAnomalyCCTV/benchmarks/run_benchmark_matrix.py \
+        --variants yolov8n_framework,yolo_world_framework,vlm_only
 """
 
 import argparse
+import importlib
 import json
 import os
 import subprocess
@@ -13,26 +31,57 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_DIR = ROOT / "EdgeAnomalyCCTV" / "benchmarks"
+SRC_DIR = ROOT / "EdgeAnomalyCCTV" / "src"
 
 DEFAULT_BENCHMARK_DIR = ROOT / "benchmark_data" / "ood_openimages_small"
 DEFAULT_OUTPUT_DIR = ROOT / "benchmark_data" / "benchmark_matrix_results"
 DEFAULT_CLASSES = "octopus,lobster,scorpion,helicopter,crab,starfish"
 DEFAULT_WORLD_MODEL = "weights/yolo/yolov8m-world.pt"
 
+sys.path.insert(0, str(SRC_DIR))
+sys.path.insert(0, str(BENCHMARK_DIR))
+
+from constants import COCO_CLASSES  # noqa: E402
+
+_ood = importlib.import_module("00_ood_classes")
+is_ood = _ood.is_ood
+
+
 VARIANTS = {
     "yolov8n_framework": {
         "model": "weights/yolo/yolov8n.pt",
         "evaluation_mode": "framework",
     },
-    "yolo_world_only": {
-        "model": DEFAULT_WORLD_MODEL,
-        "evaluation_mode": "detector_only",
-    },
     "yolo_world_framework": {
         "model": DEFAULT_WORLD_MODEL,
         "evaluation_mode": "framework",
     },
+    "yolo_world_only": {
+        "model": DEFAULT_WORLD_MODEL,
+        "evaluation_mode": "detector_only",
+        "derive_from": "yolo_world_framework",
+        "skip_judge": True,
+    },
+    "yolov8n_only": {
+        "model": "weights/yolo/yolov8n.pt",
+        "evaluation_mode": "detector_only",
+        "zero_results": True,
+        "skip_judge": True,
+    },
+    "vlm_only": {
+        "model": "kimi",
+        "evaluation_mode": "vlm_only",
+        "skip_judge": True,
+    },
 }
+
+DEFAULT_VARIANTS = [
+    "yolov8n_framework",
+    "yolo_world_framework",
+    "yolo_world_only",
+    "yolov8n_only",
+    "vlm_only",
+]
 
 
 def _load_dotenv() -> None:
@@ -109,7 +158,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--variants",
         type=str,
-        default=",".join(VARIANTS.keys()),
+        default=",".join(DEFAULT_VARIANTS),
         help="Comma-separated benchmark variants to run",
     )
     parser.add_argument(
@@ -141,6 +190,24 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Device for local judge model (cpu/cuda/mps)",
+    )
+    parser.add_argument(
+        "--vlm-only-model",
+        type=str,
+        default=os.getenv("KIMI_MODEL_NAME", "kimi-code"),
+        help="Kimi model name for the VLM-only variant (default: KIMI_MODEL_NAME)",
+    )
+    parser.add_argument(
+        "--vlm-only-concurrency",
+        type=int,
+        default=5,
+        help="Max concurrent Kimi API calls for the VLM-only variant (default: 5)",
+    )
+    parser.add_argument(
+        "--vlm-only-max-image-size",
+        type=int,
+        default=512,
+        help="Resize longest image edge to this value before sending to Kimi (default: 512)",
     )
     parser.add_argument(
         "--skip-prepare",
@@ -179,6 +246,24 @@ def _parse_variants(raw_variants: str) -> list[str]:
     return variants
 
 
+def _variant_depth(variant: str) -> int:
+    """Return dependency depth so derived variants run after their base."""
+    if variant not in VARIANTS:
+        return 0
+    dep = VARIANTS[variant].get("derive_from")
+    if dep is None:
+        return 0
+    if dep not in VARIANTS:
+        raise SystemExit(
+            f"Variant '{variant}' derives from unknown base '{dep}'."
+        )
+    return _variant_depth(dep) + 1
+
+
+def _order_variants(variants: list[str]) -> list[str]:
+    return sorted(variants, key=lambda v: _variant_depth(v))
+
+
 def _run_step(name: str, cmd: list[str]) -> None:
     print(f"\n{'=' * 60}", flush=True)
     print(f"[MATRIX] {name}", flush=True)
@@ -193,6 +278,18 @@ def _run_step(name: str, cmd: list[str]) -> None:
 def _read_json(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _collect_image_paths(benchmark_dir: Path) -> list[Path]:
+    exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+    paths = []
+    for p in benchmark_dir.rglob("*"):
+        if p.suffix.lower() not in exts:
+            continue
+        if any(part.startswith(".") for part in p.relative_to(benchmark_dir).parts[:-1]):
+            continue
+        paths.append(p)
+    return sorted(paths)
 
 
 def _prepare_benchmark(args: argparse.Namespace, python: str) -> None:
@@ -227,6 +324,211 @@ def _prepare_benchmark(args: argparse.Namespace, python: str) -> None:
     _run_step("Prepare benchmark", prepare_cmd)
 
 
+def _run_02_benchmark(
+    variant: str,
+    config: dict,
+    benchmark_dir: Path,
+    variant_output_dir: Path,
+    args: argparse.Namespace,
+    python: str,
+) -> None:
+    """Run 02_run_ood_benchmark.py for a framework/detector_only variant."""
+    run_cmd = [
+        python,
+        str(BENCHMARK_DIR / "02_run_ood_benchmark.py"),
+        "--benchmark-dir",
+        str(benchmark_dir),
+        "--output-dir",
+        str(variant_output_dir),
+        "--model",
+        config["model"],
+        "--evaluation-mode",
+        config["evaluation_mode"],
+    ]
+    if args.save_visualizations:
+        run_cmd.append("--save-visualizations")
+    run_cmd.append("--save-crops")
+    run_cmd.extend(["--top-k-per-image", str(args.top_k_per_image)])
+
+    _run_step(f"Run variant: {variant}", run_cmd)
+
+
+def _build_zero_summary(
+    variant: str,
+    config: dict,
+    benchmark_dir: Path,
+    summary_path: Path,
+) -> dict:
+    """Create a synthetic all-zeros detector_only summary for yolov8n_only."""
+    total_images = len(_collect_image_paths(benchmark_dir))
+
+    summary = {
+        "benchmark_dir": str(benchmark_dir),
+        "model": config["model"],
+        "evaluation_mode": config["evaluation_mode"],
+        "known_classes": COCO_CLASSES,
+        "total_images": total_images,
+        "images_with_detections": 0,
+        "total_detections": 0,
+        "detector_non_coco_count": 0,
+        "detector_non_coco_rate": 0.0,
+        "images_with_non_coco_detections": 0,
+        "total_non_coco_detections": 0,
+        "detection_level_non_coco_rate": 0.0,
+        "image_level_non_coco_rate": 0.0,
+        "results": [],
+    }
+
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"[MATRIX] Wrote zero-result summary for {variant}: {summary_path}")
+    return summary
+
+
+def _derive_detector_only_summary(
+    variant: str,
+    config: dict,
+    benchmark_dir: Path,
+    output_dir: Path,
+    args: argparse.Namespace,
+    python: str,
+) -> dict:
+    """
+    Derive a yolo_world_only detector_only summary from the matching
+    yolo_world_framework run.  This avoids running the benchmark twice.
+    """
+    base_variant = config["derive_from"]
+    base_config = VARIANTS[base_variant]
+    base_output_dir = output_dir / base_variant
+    base_summary_path = base_output_dir / "ood_benchmark_summary.json"
+
+    if not base_summary_path.exists() and not args.skip_run:
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+        _run_02_benchmark(
+            base_variant, base_config, benchmark_dir, base_output_dir, args, python
+        )
+
+    if not base_summary_path.exists():
+        print(
+            f"[MATRIX] ERROR: base summary not found for {variant}: {base_summary_path}"
+        )
+        sys.exit(1)
+
+    base_summary = _read_json(base_summary_path)
+    base_results = base_summary.get("results", [])
+
+    total_images = base_summary.get("total_images", 0)
+    images_with_detections = base_summary.get("images_with_detections", 0)
+    total_detections = base_summary.get("total_detections", 0)
+    detector_non_coco_count = base_summary.get("detector_non_coco_count", 0)
+    detector_non_coco_rate = base_summary.get("detector_non_coco_rate", 0.0)
+
+    images_with_non_coco = 0
+    total_non_coco_detections = detector_non_coco_count
+    derived_results = []
+
+    for img_result in base_results:
+        gt_class = img_result.get("ground_truth_class", "unknown")
+        tracks = []
+        non_coco_count = 0
+
+        for track in img_result.get("tracks", []):
+            detected_label = track.get("yolo_display_class") or track.get("yolo_class") or "unknown"
+            predicted_is_non_coco = is_ood(detected_label)
+            if predicted_is_non_coco:
+                non_coco_count += 1
+
+            tracks.append({
+                "track_id": track.get("track_id"),
+                "ground_truth_class": gt_class,
+                "yolo_class": track.get("yolo_class"),
+                "yolo_display_class": track.get("yolo_display_class"),
+                "yolo_conf": track.get("yolo_conf"),
+                "bbox": track.get("bbox"),
+                "predicted_is_non_coco": predicted_is_non_coco,
+            })
+
+        any_non_coco = non_coco_count > 0
+        if any_non_coco:
+            images_with_non_coco += 1
+
+        derived_results.append({
+            "image": img_result.get("image"),
+            "relative": img_result.get("relative"),
+            "ground_truth_class": gt_class,
+            "num_detections": img_result.get("num_detections", 0),
+            "tracks": tracks,
+            "non_coco_detection_count": non_coco_count,
+            "any_non_coco_detection": any_non_coco,
+        })
+
+    derived_summary = {
+        "benchmark_dir": str(benchmark_dir),
+        "model": config["model"],
+        "evaluation_mode": config["evaluation_mode"],
+        "known_classes": COCO_CLASSES,
+        "total_images": total_images,
+        "images_with_detections": images_with_detections,
+        "total_detections": total_detections,
+        "detector_non_coco_count": detector_non_coco_count,
+        "detector_non_coco_rate": detector_non_coco_rate,
+        "images_with_non_coco_detections": images_with_non_coco,
+        "total_non_coco_detections": total_non_coco_detections,
+        "detection_level_non_coco_rate": (
+            total_non_coco_detections / total_detections if total_detections else 0.0
+        ),
+        "image_level_non_coco_rate": (
+            images_with_non_coco / images_with_detections if images_with_detections else 0.0
+        ),
+        "results": derived_results,
+    }
+
+    variant_output_dir = output_dir / variant
+    variant_output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = variant_output_dir / "ood_benchmark_summary.json"
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(derived_summary, f, indent=2)
+
+    print(f"[MATRIX] Derived detector-only summary for {variant}: {summary_path}")
+    return derived_summary
+
+
+def _run_vlm_only(
+    variant: str,
+    config: dict,
+    benchmark_dir: Path,
+    variant_output_dir: Path,
+    args: argparse.Namespace,
+    python: str,
+) -> None:
+    """Run the Kimi VLM-only baseline."""
+    if not os.environ.get("KIMI_API_KEY"):
+        print(
+            "[MATRIX] ERROR: KIMI_API_KEY is required for the vlm_only variant. "
+            "Set it in the .env file or environment."
+        )
+        sys.exit(1)
+
+    vlm_cmd = [
+        python,
+        str(BENCHMARK_DIR / "04_vlm_only_benchmark.py"),
+        "--benchmark-dir",
+        str(benchmark_dir),
+        "--output-dir",
+        str(variant_output_dir),
+        "--kimi-model-name",
+        args.vlm_only_model,
+        "--concurrency",
+        str(args.vlm_only_concurrency),
+        "--max-image-size",
+        str(args.vlm_only_max_image_size),
+    ]
+
+    _run_step(f"Run variant: {variant}", vlm_cmd)
+
+
 def _build_variant_record(variant: str, run_summary: dict, judge_report: dict | None) -> dict:
     record = {
         "variant": variant,
@@ -240,7 +542,7 @@ def _build_variant_record(variant: str, run_summary: dict, judge_report: dict | 
         "detector_non_coco_rate": run_summary.get("detector_non_coco_rate"),
     }
 
-    if run_summary.get("evaluation_mode") == "framework":
+    if run_summary.get("evaluation_mode") in ("framework", "vlm_only"):
         gt = run_summary.get("ground_truth_metrics", {})
         record.update({
             "images_with_outliers": run_summary.get("images_with_outliers"),
@@ -276,7 +578,8 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    variants = _parse_variants(args.variants)
+    selected_variants = _parse_variants(args.variants)
+    variants = _order_variants(selected_variants)
 
     _prepare_benchmark(args, python)
 
@@ -285,38 +588,43 @@ def main() -> None:
         config = VARIANTS[variant]
         variant_output_dir = output_dir / variant
         variant_output_dir.mkdir(parents=True, exist_ok=True)
-
-        if not args.skip_run:
-            run_cmd = [
-                python,
-                str(BENCHMARK_DIR / "02_run_ood_benchmark.py"),
-                "--benchmark-dir",
-                str(benchmark_dir),
-                "--output-dir",
-                str(variant_output_dir),
-                "--model",
-                config["model"],
-                "--evaluation-mode",
-                config["evaluation_mode"],
-            ]
-            if args.save_visualizations:
-                run_cmd.append("--save-visualizations")
-            run_cmd.append("--save-crops")
-            run_cmd.extend(["--top-k-per-image", str(args.top_k_per_image)])
-
-            _run_step(f"Run variant: {variant}", run_cmd)
-
         summary_path = variant_output_dir / "ood_benchmark_summary.json"
-        if not summary_path.exists():
-            print(f"[MATRIX] ERROR: summary file not found for {variant}: {summary_path}")
-            sys.exit(1)
+        run_summary = None
 
-        run_summary = _read_json(summary_path)
+        if config.get("zero_results"):
+            run_summary = _build_zero_summary(
+                variant, config, benchmark_dir, summary_path
+            )
+        elif config.get("derive_from"):
+            run_summary = _derive_detector_only_summary(
+                variant, config, benchmark_dir, output_dir, args, python
+            )
+            summary_path = variant_output_dir / "ood_benchmark_summary.json"
+        elif config["evaluation_mode"] == "vlm_only":
+            if not args.skip_run:
+                _run_vlm_only(
+                    variant, config, benchmark_dir, variant_output_dir, args, python
+                )
+            if not summary_path.exists():
+                print(f"[MATRIX] ERROR: summary file not found for {variant}: {summary_path}")
+                sys.exit(1)
+            run_summary = _read_json(summary_path)
+        else:
+            if not args.skip_run:
+                _run_02_benchmark(
+                    variant, config, benchmark_dir, variant_output_dir, args, python
+                )
+            if not summary_path.exists():
+                print(f"[MATRIX] ERROR: summary file not found for {variant}: {summary_path}")
+                sys.exit(1)
+            run_summary = _read_json(summary_path)
+
         run_summary["summary_path"] = str(summary_path)
 
         judge_report = None
         if (
             not args.skip_judge
+            and not config.get("skip_judge")
             and args.judge_backend != "none"
         ):
             judge_cmd = [
@@ -370,7 +678,7 @@ def main() -> None:
         ood_rate = rec.get("detector_non_coco_rate")
         if ood_rate is None:
             # Fallback for older summaries without detector_non_coco_rate.
-            if rec.get("evaluation_mode") == "framework":
+            if rec.get("evaluation_mode") in ("framework", "vlm_only"):
                 ood_rate = rec.get("outlier_recall")
             else:
                 ood_rate = rec.get("detection_level_non_coco_rate")
