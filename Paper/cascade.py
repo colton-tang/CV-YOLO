@@ -21,7 +21,7 @@ class CascadableYOLO:
     """
 
     def __init__(self,
-                 model_path='yolov8n.pt',
+                 model_path='weights/yolo/yolov8n.pt',
                  conf_threshold=0.45,
                  anomaly_classes=None,
                  person_cue=True,

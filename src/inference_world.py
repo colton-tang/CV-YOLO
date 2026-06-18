@@ -27,8 +27,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        default="yolov8m-world.pt",
-        help="Path or name of the YOLO-World model (default: yolov8m-world.pt)",
+        default="weights/yolo/yolov8m-world.pt",
+        help="Path or name of the YOLO-World model (default: weights/yolo/yolov8m-world.pt)",
     )
     parser.add_argument(
         "--classes",

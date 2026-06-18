@@ -59,7 +59,7 @@ class DetectionTrackingLayer:
         "handbag": "bag",
     }
 
-    def __init__(self, model_path="yolov8n.pt", conf_threshold=LOW_CONFIDENCE_THRESHOLD, known_classes=None):
+    def __init__(self, model_path="weights/yolo/yolov8n.pt", conf_threshold=LOW_CONFIDENCE_THRESHOLD, known_classes=None):
         self.conf_threshold = conf_threshold
         self.known_classes = set(known_classes or [])
         self.model = YOLO(model_path)

@@ -20,7 +20,17 @@ async def main():
         "--mode",
         type=str,
         choices=["graph", "video"],
-        help="Mode to run: 'graph' (benchmark plot) or 'video' (real-time camera)"
+        help="Mode to run: 'graph' (static image/directory benchmark) or 'video' (real-time camera/video)"
+    )
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help=(
+            "Input source. For graph mode: path to a single image. "
+            "For video mode: path to a video file, RTSP/HTTP URL, or camera index (e.g., 0). "
+            "If omitted, graph mode defaults to the bundled benchmark image and video mode defaults to camera 0."
+        ),
     )
     args, unknown = parser.parse_known_args()
 
@@ -42,19 +52,24 @@ async def main():
             print("\nExiting.")
             return
 
+    # Resolve input source
+    if args.input is None:
+        resolved_input = str(Path(__file__).resolve().parents[2] / "benchmark_data" / "kitchen_person.jpg") if mode == "graph" else "0"
+    else:
+        resolved_input = args.input
+
     # Initialization based on mode
     if mode == "graph":
         print("\nStarting Static Image Detection (Graph mode)...")
-        image_path = str(Path(__file__).resolve().parents[2] / "benchmark_data" / "kitchen_person.jpg")
-        ingestion = IngestionLayer(mode="IMAGE", source=image_path)
+        ingestion = IngestionLayer(mode="IMAGE", source=resolved_input)
     else:
         print("\nStarting Real-time Camera Detection (Video mode)...")
-        ingestion = IngestionLayer(mode="VIDEO", source="0", width=640, height=480)
+        ingestion = IngestionLayer(mode="VIDEO", source=resolved_input, width=640, height=480)
         if ingestion.mode == "VIDEO" and (not ingestion.cap or not ingestion.cap.isOpened()):
-            print("\nError: Camera source '0' could not be opened.")
+            print(f"\nError: Video source '{resolved_input}' could not be opened.")
             print("Please check if:")
             print("1. Another application is currently using your webcam.")
-            print("2. The camera index (0) is correct (try '1' if you have an external webcam).")
+            print("2. The camera index / path / URL is correct.")
             print("3. macOS has camera permission enabled for this process.")
             return
 

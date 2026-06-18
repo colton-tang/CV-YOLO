@@ -25,8 +25,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        default="yolo26n.pt",
-        help="Path or name of the YOLO26n model (default: yolo26n.pt)",
+        default="weights/yolo/yolo26n.pt",
+        help="Path or name of the YOLO26n model (default: weights/yolo/yolo26n.pt)",
     )
     parser.add_argument(
         "--imgsz",
