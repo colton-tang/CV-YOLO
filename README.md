@@ -11,11 +11,6 @@ anomaly detection in images and video:
 - **Presentation** (`edgeanomaly-presentation/`) — a Vite + React frontend for
   demoing / visualizing results.
 
-> **Note:** The `Paper/` folder is detached from this repository (ignored by Git)
-> and kept locally for reference. It contains PDFs and a standalone reproducible
-> implementation of the cascading multi-agent anomaly-detection framework from
-> arXiv:2601.06204v3.
-
 ---
 
 ## Setup
@@ -333,32 +328,6 @@ python EdgeAnomalyCCTV/src/main.py --mode graph \
 
 ---
 
-## Paper — Cascading Multi-Agent Anomaly Detection
-
-> **Detached folder.** `Paper/` is ignored by Git and kept locally for reference.
-
-The folder contains a reproducible implementation of the cascading multi-agent
-anomaly detection framework introduced in the paper *"Cascading Multi-Agent
-Anomaly Detection in Surveillance Systems via Vision-Language Models and
-Embedding-Based Classification"* (arXiv:2601.06204v3).
-
-### Run the paper pipeline
-
-```bash
-# Install dependencies
-pip install ultralytics transformers sentence-transformers opencv-python torch moondream
-
-# Run on the bundled benchmark images
-python Paper/cascade.py
-
-# Treat every COCO class as an anomaly cue
-python Paper/cascade.py --all-classes-anomaly
-```
-
-Annotated outputs are saved to `benchmark_results/visualized/`.
-
----
-
 ## Project Layout
 
 ```text
@@ -367,9 +336,6 @@ Annotated outputs are saved to `benchmark_results/visualized/`.
 ├── EdgeAnomalyCCTV/
 │   ├── src/                          # 5-layer edge pipeline
 │   └── benchmarks/                   # OOD-class benchmark helpers + matrix runner
-├── Paper/                            # Detached reference folder (ignored by Git)
-│   ├── cascade.py                    # Cascading multi-agent pipeline
-│   └── requirements.txt
 ├── benchmark_data/                   # Sample images, videos, and generated OOD benchmarks
 │   ├── benchmark_matrix_results/     # Combined matrix benchmark outputs
 │   ├── legacy/                       # Original bundled sample media
