@@ -35,6 +35,10 @@ outputs/
 
 # Logs
 *.log
+
+# Untracked large PDF
+Paper/FULLTEXT01.pdf
+
 Dataset
 custom_benchmark_bundle/
 # Benchmark data (images/videos are large and should not be tracked)
