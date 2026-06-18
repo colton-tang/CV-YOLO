@@ -21,7 +21,7 @@ class LLMClassifierLayer:
 
         # Daemon-thread executor so the process can exit even if inference is running.
         self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1,
+            max_workers=4,
             thread_name_prefix="vlm_infer",
         )
 
