@@ -143,12 +143,22 @@ Available variants:
 The combined summary is written to
 `benchmark_data/benchmark_matrix_results/benchmark_matrix_summary.json`.
 
+### OOD Evaluation Matrix
+
+The current presentation matrix corresponds to:
+
+- Dataset: `OpenImages OOD (96 pics)`
+- Judge: `Kimi VLM`
+
 ### Interpreting results
 
 `run_benchmark_matrix.py` prints a final table at the end of execution:
 
 ```text
-[MATRIX] Key metrics per variant:
+[MATRIX] OOD Evaluation Matrix
+Dataset: OpenImages OOD (96 pics)
+Judge: Kimi VLM
+
 Variant                          OOD Detection Rate   LLM Judge Accuracy
 ------------------------------------------------------------------------
 yolov8n_only                                  0.00%                0.00%

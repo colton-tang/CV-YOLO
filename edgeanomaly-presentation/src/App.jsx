@@ -797,14 +797,21 @@ function BenchmarkSlide({ slide }) {
           </div>
         </div>
 
-        <div className="mt-3 flex items-center justify-between rounded-[12px] bg-emerald-50/60 border border-emerald-250/50 p-3">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-2 w-2 rounded-full bg-emerald-500" />
-            <p className="text-xs text-slate-700 font-semibold">
-              Benchmark execution completed. Matrix results successfully populated.
-            </p>
+        <div className="mt-3 rounded-[12px] border border-emerald-200/70 bg-emerald-50/60 p-3">
+          <div className="grid gap-2 md:grid-cols-2">
+            <div>
+              <p className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-emerald-700">OOD Detection Rate</p>
+              <p className="mt-1 text-[0.74rem] leading-relaxed text-slate-700">
+                The share of out-of-distribution objects that the variant successfully flags as outside the normal closed-set categories.
+              </p>
+            </div>
+            <div className="border-t border-emerald-200/70 pt-2 md:border-l md:border-t-0 md:pl-3 md:pt-0">
+              <p className="text-[0.68rem] font-bold uppercase tracking-[0.12em] text-emerald-700">LLM Judge Accuracy</p>
+              <p className="mt-1 text-[0.74rem] leading-relaxed text-slate-700">
+                The correctness of the VLM judge when validating whether the detected anomaly label matches the ground-truth object.
+              </p>
+            </div>
           </div>
-          <span className="text-[0.68rem] text-slate-400 font-mono">Outputs: benchmark_matrix_summary.json</span>
         </div>
       </div>
 
